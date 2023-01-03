@@ -8,6 +8,8 @@ An implementation of a modular HUD in SF for Garry's Mod
 # Demo
 ![image](https://user-images.githubusercontent.com/109800352/210301162-1db72574-db24-42d1-9156-e32a79638dbd.png)
 
+# Status
+- Currently only a daktank example hud has been created. If the time presents itself, an ACF example may be made.
 
 # Installation Instructions:
 1. Download the zip folder and unzip it
