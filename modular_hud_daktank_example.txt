@@ -1,0 +1,397 @@
+--@name Modular HUD V1 (Public Release) (Daktank)
+--@author
+--@shared
+--@include lib/modular_hud_elements_daktank.txt
+--@include lib/modular_hud_elements_basic.txt
+--@include lib/modular_hud_base.txt
+--@include lib/modular_wire_helper.txt
+--@include lib/modular_shared_memory_2.txt
+
+--[[
+MODULAR HUD V1 PUBLIC RELEASE (Daktank version)
+
+This SF is an example of how to make a HUD using the relevant "modular" libraries.
+
+Beginner level SF knowledge would be recommended for modifying the HUD.
+
+More information on how the libraries work can be found in their corresponding files. 
+
+In particular, this example hud was made to work with Daktank.
+
+Contact (Discord: Len#4767) ((Please read comments before asking, I will try to help but I will likely be busy.))
+
+Note: The structure of the hud elements is as follows:
+    - Initialize a component in initSync() by using <component name>:new(<args>)
+    - Render a component in renderHud() by using <component name>:render(<args>)
+    - I recommend you use the hudElem["<arbitrary component name>"] = <component name>:new(<args>)
+      because it allows you to make rapid changes without having to add/delete variables constantly.
+    - !!!If you want to remove an element from the hud, simply comment out (or delete) the lines where it is initialized and rendered!!!
+    
+Note: The lack of hud configuration variables is intentional. This is because:
+    - In the spirit of modularity, hud components should be addable/removable as needed. Adding variables can be done at the user's discression,
+      but if a component is to be removed, the user would have to remove the configuration variables to avoid bloating the file size 
+      (removing bloat/unused code always makes code more readable)
+    - To help, hud elements generally follow the same structure on initialization:
+        - 1st argument is res, a table containing the center X,Y of the screen and the Y resolution
+        - 2nd argument is px, the x coordinate of the component
+        - 3rd argument is py, the y coordinate of the component
+        - 4th argument is width, the width of the component
+        - 5th argument is height, the height of the component
+        - Any arguments afterwards aside from the options table are things you should specify.
+        - A table (e.x. {}) is located on the end and this is where you should add options (e.x. {scale = 2, mode = "circle"})
+            - Scaling of components can be done by passing it as an option in the table, as seen above.
+
+===========================================================================================================================================================================
+DISCLAIMER: It is the user's responsibility to ensure the usage runs lower. It should already be significantly lower than normal E2 huds by nature of being written in SF. 
+That being said, here are some tips for optimization:
+    - If you are running something that is very usage intensive, run it less often
+    - If you are running something very often, try to make it less usage intensive
+    - Try minimizing the amount of included libraries you have (the libraries already make the SF a little larger than I'd like, including more would make the file size increase).
+    - With stuff like the hud elements, if it's a simple thing that can be drawn using the normal render functions, there's no reason to make an object.
+    - More of an experimental observation, but it may be worth increasing the update rate of your main thread instead of adding another (up to a point).
+        - On this point, be mindful of the frequency and number of net messages being sent
+===========================================================================================================================================================================
+
+===========================================================================================================================================================================
+WIREUP GUIDE:
+Inputs:
+    - Gun:entity -> Main gun (Mandatory)
+    - Gun2:entity -> Secondary gun (Mandatory)
+    - Gun3:entity -> Tertiary gun (Mandatory)
+    - Turret:entity -> Turret ring (Mandatory)
+    - Base:entity -> Baseplate (Mandatory)
+    - Active -> Active on pod controller
+    - FOV -> Output from whatever manages your cam controller (otherwise you dont have to wire it)
+    - CamAng:angle -> Cam controller CamAng output
+    - CamHitPos:vector -> Cam controller HitPos output
+    - Crew -> Crew on daktank core 
+    - HP -> Health on daktank core
+    - SMCoolDown -> Cooldown output of any smoke launcher
+    - FLIRIn -> FLIR toggle input from numpad or pod controller
+Outputs:
+    - FLIROut -> Cam controller's FLIR input
+===========================================================================================================================================================================
+]]--
+
+if player() ~= owner() then return end // Don't touch this, we don't want it erroring on other people
+
+// Settings ------------------------------------------------------------------------------------------------------------------------
+// Update rate settings
+// Be VERY Careful, running either of these too often may dramatically increase their usage.
+// Note: these measurements are timesteps, i.e. the delay between executions (period). Stuff like interval from e2 
+// represent how often something happens for a given time, usually per second (frequency)
+local CLIENT_TIME_STEP = 0.1 // Time per cycle (in seconds) that Information is polled at for clientside purposes
+local SERVER_TIME_STEP = 0.1 // Time per cycle (in seconds) that information is polled at on the server, which is then sent to the client
+local DUPE_FINISH_TIME = 5 // Time (in seconds) after a dupe is "finished" to re-initialize (sometimes SENTs or whatever take time after spawning to init?)
+
+// Hud settings
+local PrimCol = Color(255,191,0,255) // This variable represents the primary color of your hud. Individual hud elements can be colored separately if needed.
+
+// Miscellaneous settings
+local SPEED_CONV = 0.06858 // Conversion factor from GMU/S to desired speed 0.042613636363636 (for MPH) and 0.06858 (for KPH)
+local SPEED_UNIT = "KPH"  
+
+// This table defines the variables that will be shared between server and client, managed by the shared_memory_2 library
+// Similar to @persist in e2, the variables persist unless changed. If it is updated on the server, it will update the client and vice versa.
+// Use the format <variable name> = "<Type>".
+// NOTE: Active = "Float" is always added to this table by the backend, do not list it here.
+// NOTE: SharedVars should be uppercased here, unlike lowercased with wire I/O types.
+SharedVars = {    
+    Gun1 = "Entity",
+    Gun1ReloadTime = "Float", 
+    Gun1MagReloadTime = "Float", 
+    Gun1CoolDown = "Float",
+    Gun1AmmoType = "String",
+    Gun1ShotsLeft = "Float",
+    Gun1TotalAmmo = "Float",
+    Gun1Penetration = "Float",
+    
+    Gun2 = "Entity",
+    Gun2ReloadTime = "Float", 
+    Gun2MagReloadTime = "Float", 
+    Gun2CoolDown = "Float",
+    Gun2AmmoType = "String",
+    Gun2ShotsLeft = "Float",
+    Gun2TotalAmmo = "Float",
+
+    Gun3 = "Entity",
+    Gun3ReloadTime = "Float", 
+    Gun3MagReloadTime = "Float", 
+    Gun3CoolDown = "Float",
+    Gun3AmmoType = "String",
+    Gun3ShotsLeft = "Float",
+    Gun3TotalAmmo = "Float",
+
+    Turret = "Entity", 
+    Base = "Entity", 
+    CamYaw = "Float",
+    CamDist = "Float",
+    FOV = "Float",
+    Crew = "Float",
+    HP = "Float",
+    FLIREnabled = "Boolean",
+    SMCoolDown = "Float",
+    ServerUS = "Float"
+}
+
+// Make sure to require the libraries you are including here.
+WireHelper = require("lib/modular_wire_helper.txt") // Useful helper functions for wiremod in SF
+SharedMemory = require("lib/modular_shared_memory_2.txt") // Class representing a shared (synced) memory accessible to both client and server
+MHEBasic = require("lib/modular_hud_elements_basic.txt") // Addable HUD elements that are intended for vehichles, but could be used for normal huds?
+MHEDak = require("lib/modular_hud_elements_daktank.txt") // Addable HUD elements that only work for daktank
+HudBase = require("lib/modular_hud_base.txt") // Class repressenting the backend of the hud, deals with hud creation and handling hooks
+
+if CLIENT then
+    // All the things that happen here happen in the CLIENT context. You can't access SERVER only things from here.
+    
+    smClient = SharedMemory:new() // Don't modify this, we use it to represent the client in the shared memory
+    
+    // Include your variables here -------------------------------------------------------------------------------------------------
+    // The variables defined here will be accessible to anything within the client context.
+    // Misc state vars
+    local Speed = 0
+    local Base = nil
+    local Turret = nil
+    
+    local TurretAng = 0
+    local BaseAng = 0
+    
+    // Misc Constants
+    local MAX_HP = 0
+    local MAX_CREW = 0
+    
+    // Hud elements
+    local hudElem = {} // Table containing hud elements
+    local hideHud = false // Whether or not to hide parts of the hud
+    local resTune = 1 // If you want to scale everything in the hud by a factor, use this
+    
+    // Do not modify these variables -----------------------------------------------------------------------------------------------
+    local resX, resY = render.getResolution()
+    local cenX, cenY = resX/2, resY/2
+    local RES = {cenX,cenY,resY*resTune} // Table containing resolution data
+
+    // Modifiable Hud Code Below ---------------------------------------------------------------------------------------------------
+    
+    local clientInit = function() // Called after the initSync, used for initializing the client 
+        // If you want to add extra loops to your hud, you can add them here
+    end
+    
+    local clientMain = function() // Called in a loop, after clientInit is called
+        Speed = math.round(Base:getVelocity():getLength() * SPEED_CONV)    
+        TurretAng = Turret:getAngles().yaw
+        BaseAng = Base:getAngles().yaw
+    end
+    
+    local renderHud = function() // Called by the "DrawHud" look.
+        // You should render your hud elements here.
+        // Since this is also in a render context, you can use render functions here.
+        hudElem["CrossHair"]:render()
+       
+        hudElem["ReloadCross1"]:render(smClient:getVar("Gun1CoolDown"),smClient:getVar("Gun1ShotsLeft"),smClient:getVar("Gun1TotalAmmo"),0,0)
+        
+        hudElem["Rangefind"]:render(math.round(smClient:getVar("CamDist")).."m")
+        hudElem["Penetration"]:render(math.floor(smClient:getVar("Gun1Penetration")).."mm")
+        
+        if not hideHud then hudElem["Compass"]:render(90-smClient:getVar("CamYaw")) end
+        
+        hudElem["Orientation"]:render(180-TurretAng,90-BaseAng) // Entity angles are funny so we have to add/subtract multiples of 90
+        
+        hudElem["SpeedText"]:render(""..Speed.." "..SPEED_UNIT)
+        hudElem["CrewText"]:render("Crew: "..smClient:getVar("Crew").." / "..MAX_CREW)
+        
+        hudElem["FuelBar"]:render(smClient:getVar("HP"))
+        
+        hudElem["Ammo1Text"]:render(smClient:getVar("Gun1AmmoType").." | "..smClient:getVar("Gun1ShotsLeft").."/"..smClient:getVar("Gun1TotalAmmo"),smClient:getVar("Gun1CoolDown"))
+        hudElem["Ammo2Text"]:render(smClient:getVar("Gun2AmmoType").." | "..smClient:getVar("Gun2ShotsLeft").."/"..smClient:getVar("Gun2TotalAmmo"),smClient:getVar("Gun2CoolDown"))
+        hudElem["Ammo3Text"]:render(smClient:getVar("Gun3AmmoType").." | "..smClient:getVar("Gun3ShotsLeft").."/"..smClient:getVar("Gun3TotalAmmo"),smClient:getVar("Gun3CoolDown"))
+
+        hudElem["Ammo1Timer"]:render(smClient:getVar("Gun1CoolDown"),smClient:getVar("Gun1ShotsLeft"))
+        hudElem["Ammo2Timer"]:render(smClient:getVar("Gun2CoolDown"),smClient:getVar("Gun2ShotsLeft"))
+        hudElem["Ammo3Timer"]:render(smClient:getVar("Gun3CoolDown"),smClient:getVar("Gun3ShotsLeft"))
+        
+        hudElem["SmokeBox"]:render("SM",smClient:getVar("SMCoolDown")) // cooldown pct is 0 when ready and 100 after firing
+        hudElem["FLIRBox"]:render("FLIR",smClient:getVar("FLIREnabled")) // cooldown pct is 0 when ready and 100 after firing
+        hudElem["FOVBox"]:render("FOV "..smClient:getVar("FOV"))
+        
+        hudElem["ViewBorder"]:render()
+        hudElem["ViewCross"]:render()
+        
+        // Example of using the normal render functions here     
+        render.drawText(cenX+800,cenY+400,"CLIENT US: "..math.round(cpuAverage()*1000000),0) 
+        render.drawText(cenX+800,cenY+420,"SERVER US: "..smClient:getVar("ServerUS"),0)        
+    end
+    
+    local initSync = function() // Called after the server sends information to the client, via the function defined by the serverside initSync
+        // You should initialize your hud elements here
+        // Do note that you have access to anything sent by the initial sync and the default values of other variables in the shared memory.
+        
+        Base = smClient:getVar("Base") // Example of setting normal clientside variables for use in anything clientside
+        Turret = smClient:getVar("Turret")
+        
+        MAX_CREW = smClient:getVar("Crew")
+        MAX_HP = smClient:getVar("HP")
+        
+        
+        // You can find out how to initialize these hud elements by their documentation in the files where they are defined
+        hudElem["CrossHair"] = MHEBasic["CrossHair"]:new(RES,0,0,10,2,PrimCol,{})
+
+        hudElem["ReloadCross1"] = MHEDak["ReloadIndicator"]:new(RES,10,12,32,smClient:getVar("Gun1"),smClient:getVar("Gun1ReloadTime"),
+        {simple=false,magType="mag",magTime=smClient:getVar("Gun1MagReloadTime"),magSize=smClient:getVar("Gun1ShotsLeft")})
+        
+        hudElem["Rangefind"] = MHEBasic["TextSimple"]:new(RES,60,50,16,PrimCol,{hAlign = 0})
+        hudElem["Penetration"] = MHEBasic["TextSimple"]:new(RES,-60,50,16,PrimCol,{hAlign = 2})
+        
+        hudElem["Compass"] = MHEBasic["SlidingCompass"]:new(RES,0,-220,640,40,PrimCol,{displayRange=90,tickRes=15,subTickCount=3,tickWidth=2})     
+        hudElem["Orientation"] = MHEBasic["TankOrientation"]:new(RES,280,245,90,PrimCol,{})
+        
+        hudElem["SpeedText"] = MHEBasic["TextBox"]:new(RES,380,-50,80,30,16,PrimCol,{})
+        hudElem["CrewText"] = MHEBasic["TextBox"]:new(RES,380,0,80,30,16,PrimCol,{})
+        hudElem["FuelBar"] = MHEBasic["ProgressBar"]:new(RES,380,50,80,30,PrimCol,Color(150,0,0),Color(0,150,0),
+        {min = 0, max = MAX_HP, drawText=true,autoColor=true,suffix=" HP",justifyUD=true})
+    
+        hudElem["Ammo1Text"] = MHEBasic["TextBox"]:new(RES,-400,-50,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
+        hudElem["Ammo2Text"] = MHEBasic["TextBox"]:new(RES,-400,0,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
+        hudElem["Ammo3Text"] = MHEBasic["TextBox"]:new(RES,-400,50,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
+        
+        hudElem["Ammo1Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,-50,50,30,smClient:getVar("Gun1ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun1MagReloadTime")})
+        hudElem["Ammo2Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,0,50,30,smClient:getVar("Gun2ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun2MagReloadTime")})
+        hudElem["Ammo3Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,50,50,30,smClient:getVar("Gun3ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun3MagReloadTime")})
+        
+        // Using the following colFunc, if x is 1, it returns 0 which means highCol. If x is anything else, return 0 which means lowCol.
+        hudElem["SmokeBox"] = MHEBasic["TextBox"]:new(RES,-292.5,215,55,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
+        hudElem["FLIRBox"] = MHEBasic["TextBox"]:new(RES,-227.5,215,55,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true})
+        hudElem["FOVBox"] = MHEBasic["TextBox"]:new(RES,-260,260,120,30,16,PrimCol,{})
+        
+        hudElem["ViewBorder"] = MHEBasic["BF4ViewBorder"]:new(RES,0,0,PrimCol,{})
+        hudElem["ViewCross"] = MHEBasic["BF4ViewCross"]:new(RES,0,0,PrimCol,{})
+    end
+    
+    local receptions = function() // These are ran by the hud to specify how the client should react if a variable is updated over the shared memory
+        // NOTE: YOU SHOULD MAKE SURE TO RECEIVE ALL VARIABLES IN YOUR SHARED MEMORY (Active and anything defined in SharedVars
+        // callback can be specified or nil, if you just want to receive.
+        // smClient:receiveVar("<variable name>",<callback>)
+        
+        smClient:receiveVar("Gun1CoolDown",nil)    smClient:receiveVar("Gun1ShotsLeft",nil)   smClient:receiveVar("Gun1TotalAmmo",nil)    smClient:receiveVar("Gun1AmmoType",nil)   smClient:receiveVar("Gun1Penetration",nil)
+        smClient:receiveVar("Gun2CoolDown",nil)    smClient:receiveVar("Gun2ShotsLeft",nil)   smClient:receiveVar("Gun2TotalAmmo",nil)    smClient:receiveVar("Gun2AmmoType",nil)
+        smClient:receiveVar("Gun3CoolDown",nil)    smClient:receiveVar("Gun3ShotsLeft",nil)   smClient:receiveVar("Gun3TotalAmmo",nil)    smClient:receiveVar("Gun3AmmoType",nil)
+        smClient:receiveVar("CamYaw",nil)   smClient:receiveVar("CamDist",nil)   smClient:receiveVar("Crew",nil)   smClient:receiveVar("HP",nil)   smClient:receiveVar("ServerUS",nil)   
+        smClient:receiveVar("SMCoolDown",nil)   smClient:receiveVar("FOV",nil) smClient:receiveVar("FLIREnabled",nil)
+    end
+    
+    net.receive("hide_compass",function() hideHud = true end) // Receive chat command to hide compass
+    
+    hudClient = HudBase["client"]:new(smClient,clientInit,clientMain,initSync,CLIENT_TIME_STEP,renderHud,receptions) // Don't touch this
+elseif SERVER then
+    // All the things that happen here happen in the SERVER context. You can't access CLIENT only things from here.
+    setIO(
+        parseE2IO("Gun:entity Gun2:entity Gun3:entity Turret:entity Base:entity Active FOV CamAng:angle CamHitPos:vector Crew HP SMCoolDown FLIRIn"),
+        parseE2IO("FLIROut")
+    )
+    
+    // Enter the names of entities which must be wired to avoid errors (separated by spaces) and without type annotations
+    inputChecks = "Gun Gun2 Gun3 Turret Base"
+        
+    // These are used repeatedly, so I put them into a table
+    local Gun = wire.ports.Gun
+    local Gun2 = wire.ports.Gun2
+    local Gun3 = wire.ports.Gun3
+    local gwl = wire.getWirelink(Gun)
+    local gwl2 = wire.getWirelink(Gun2)
+    local gwl3 = wire.getWirelink(Gun3) 
+    local Turret = wire.ports.Turret
+    local Base = wire.ports.Base
+    
+    // Serverside state variable
+    local FLIROut = 0
+    
+    // Start of actual code
+    smServer = SharedMemory:new(SharedVars) // Don't modify this, we use it to represent the server in the shared memory   
+    
+    local serverInit = function() // Called when the server initializes? (Called after the "ClientInitialized" hook is triggered)
+        // If you want to add extra loops to your hud, you can add them here.
+--[[
+        timer.create("updateCamYaw",1/66,0,function() // Add a new "loop" running at 100ms delay, to transmit cam angle data
+            smServer:sendVar("CamYaw",wire.ports.CamAng.yaw) // The other wired inputs do not need to be updated nearly as often, and this will be choppy if ran too slow
+        end)    
+]]
+    end
+    
+    local serverMain = function() // Called in a loop, after serverInit is called. Update rate is defined in the hud's initialization
+        // You should update the variabes you need to render your hud elements here, mainly variables for wire inputs or server only info
+        if Gun:isValid() then // We don't want to crash if our gun is shot off
+            smServer:sendVar("Gun1CoolDown",gwl['Cooldown'])
+            smServer:sendVar("Gun1ShotsLeft",gwl['MagazineRounds'])
+            smServer:sendVar("Gun1TotalAmmo",gwl['Ammo'])
+            smServer:sendVar("Gun1AmmoType",dakAmmoShort(gwl['AmmoType']))
+            smServer:sendVar("Gun1Penetration",gwl['Penetration'])
+        end
+        
+        if Gun2:isValid() then // We don't want to crash if our gun is shot off
+            smServer:sendVar("Gun2CoolDown",gwl2['Cooldown']) 
+            smServer:sendVar("Gun2ShotsLeft",gwl2['Ammo']) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
+            smServer:sendVar("Gun2TotalAmmo",gwl2['Ammo'])
+            smServer:sendVar("Gun2AmmoType",dakAmmoShort(gwl2['AmmoType'])) 
+        end
+        
+        if Gun3:isValid() then // We don't want to crash if our gun is shot off
+            smServer:sendVar("Gun3CoolDown",gwl3['Cooldown']) 
+            smServer:sendVar("Gun3ShotsLeft",gwl3['Ammo']) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
+            smServer:sendVar("Gun3TotalAmmo",gwl3['Ammo'])
+            smServer:sendVar("Gun3AmmoType",dakAmmoShort(gwl3['AmmoType'])) 
+        end
+    
+        smServer:sendVar("CamYaw",wire.ports.CamAng.yaw)
+        smServer:sendVar("CamDist",Base:getPos():getDistance(wire.ports.CamHitPos))
+        smServer:sendVar("FOV",wire.ports.FOV)
+        smServer:sendVar("Crew",wire.ports.Crew) 
+        smServer:sendVar("HP",wire.ports.HP) 
+        smServer:sendVar("ServerUS",math.round(cpuAverage()*1000000)) 
+        smServer:sendVar("SMCoolDown",wire.ports.SMCoolDown) 
+        smServer:sendVar("FLIREnabled",FLIROut==1)
+    end
+    
+    local initSync = function() // Called when the server initially sends data to client
+        // You should set the variables you need to create your hud elements here, as well as any initialized values (e.x. max fuel)
+        // Use the following structure:
+        // <variable name> = <variable>
+        smServer:setVars({
+            Gun1 = Gun, 
+            Gun1ReloadTime = gwl['MaxCooldown'], 
+            Gun1MagReloadTime = gwl['ReloadTime'], 
+            Gun1ShotsLeft = gwl["MagazineRounds"],
+            Gun2 = Gun2, 
+            Gun2ReloadTime = gwl2['MaxCooldown'], 
+            Gun2MagReloadTime = gwl2['ReloadTime'],
+            Gun3 = Gun3,
+            Gun3ReloadTime = gwl3['MaxCooldown'], 
+            Gun3MagReloadTime = gwl3['ReloadTime'], 
+            Turret = Turret, 
+            Base = Base, 
+            Crew = wire.ports.Crew,
+            HP = wire.ports.HP
+        })   
+    end
+    
+    local inputClk = function(name, value) // Called whenever an wire input is changed, with name and value corresponding to the update of a input
+        if name == "FLIRIn" and value == 1 then // Toggle internal FLIROut state variable based on input and update the output
+            if FLIROut == 0 then FLIROut = 1 
+            elseif FLIROut == 1 then FLIROut = 0 end
+            wire.ports.FLIROut = FLIROut
+        end
+    end
+    
+    local dupeFinished = function() // Called whenever the dupe is finished
+        
+    end
+    
+    hook.add("PlayerSay","",function(ply,text) // Chat commands addition
+        if ply ~= owner() then return end
+        if string.startWith(text,"!hidehud") then // Hide hud command (DakTank gamemode has a compass already)
+            net.start("hide_compass")
+            net.send() 
+            return ""
+        end     
+    end)
+    
+    hudServer = HudBase["server"]:new(smServer,serverInit,serverMain,initSync,inputChecks,SERVER_TIME_STEP,inputClk,dupeFinished,DUPE_FINISH_TIME) // Don't touch this
+end

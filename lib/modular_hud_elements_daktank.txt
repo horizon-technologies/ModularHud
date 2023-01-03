@@ -1,0 +1,196 @@
+--@name Modular Hud Daktank Elements
+--@author
+--@shared
+
+--[[
+This library contains various elements (specific to DakTank) for use with the modular hud library. 
+
+Classes are indexed by name in a table that is returned when you require this library.
+
+For more information, read the documentation in the "Modular Hud Basic Elements" (lib/modular_hud_elements_basic.txt) file.
+
+Contact (Discord: Len#4767) ((Please read comments before asking, I will try to help but I will likely be busy.))
+]]--
+
+--[[
+Returns the ammoType 
+]]--
+function dakAmmoShort(name)
+    local words = string.explode(" ", name)
+    local outStr = ""
+    for k, v in pairs(words) do outStr = outStr..v[1] end    
+    return outStr
+end
+
+--[[
+This class represents a reload indicator that is slaved to the gun* (can be changed dynamically). It resembles the gun reload indicator from war thunder.
+    - r1 (float) represents the radius of the inner ring.
+    - r2 (float) represents the radius of the outter ring.
+    - fidelity (float) represents the number of vertices used to create the pseudo hollowed circle (setting this high may hurt your client usage and fps).
+    - gun (entity) references your gun entity.
+    - normalTime (float) represents the time it takes for your gun to load a shell (not mag time).
+    - options should be a table consisting of any of the following parameters: 
+        - filter (function) should be a function which takes an entity input and returns true if it should be filtered (function(x) return x:getOwner() ~= owner())
+            - filter can also be a table of entities or a single entity (its passed directly to trace's filter argument)
+        - simple (boolean) represents whether the ring should be exist in two states (ready/unready) or be colored like a progress bar (with states between). 
+        - magType (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
+        - magTime (float) represents how long it takes for your autoloader magazine to reload (must be specified if using a mag)
+        - magSize (float) represents the capacity of your autoloader magazine, i.e. how many shells per mag (must be specified if using a mag)
+Note:
+    - At the time of writting, I have not found a way to distinguish between switching ammunition with a full magazine, and a magazine reload, as the requirements are the same.
+        - So the reload indicator's progression may look off when switching ammunition with a full magazine. 
+]]--
+local ReloadIndicator = class("modular_hud_daktank_reload_indicator")
+do
+    function ReloadIndicator:initialize(res,r1,r2,fidelity,gun,normalTime,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.gun = gun
+        self.reloadTime = normalTime
+        self.shellReloadTime = normalTime    
+
+        self.r1 = r1 * resAdjust * self.scale
+        self.r2 = r2 * resAdjust * self.scale
+        
+        self.rangerRange = 999999
+        
+        if options["filter"] ~= nil then self.filter = filter else self.filter = function(x) return x:getOwner() ~= owner() end end
+        if options["simple"] ~= nil then self.simple = options["simple"] else self.simple = false end
+        if options["magType"] ~= nil then self.magType = options["magType"] else self.magType = "single" end
+        if options["magTime"] ~= nil then self.magReloadTime = options["magTime"] end
+        if options["magSize"] ~= nil then self.magSize = options["magSize"] end
+
+        self.fidelity = fidelity
+        self.step = 360/fidelity
+        
+        // These could be changed if you really want but i doubt you'd need to, red/green have universal meaning.
+        self.readyColor = Color(0,255,0)
+        self.emptyColor = Color(255,0,0)
+        self.reloadColor = Color(0,150,0)
+        self.remainReloadColor = Color(150,0,0)
+        
+        self.lastAmmo = 0
+        
+        self.lastFired = timer.curtime()
+
+        self.polies = {}
+        
+        // Precaching polygon vertices
+        for i = 1, self.fidelity do
+            local curang = i * self.step + self.step/2
+            p1x, p1y = CirclePoint(0,0, self.r1, curang-self.step/2)
+            p2x, p2y = CirclePoint(0,0, self.r2, curang-self.step/2)
+            p3x, p3y = CirclePoint(0,0, self.r2, curang+self.step/2)
+            p4x, p4y = CirclePoint(0,0, self.r1, curang+self.step/2)
+            local poly = {{x=p1x,y=p1y},{x=p2x,y=p2y},{x=p3x,y=p3y},{x=p4x,y=p4y}}
+            self.polies[i] = poly
+        end
+    end
+    
+    function ReloadIndicator:render(coolDown,mag,ammo,ammoType,sensitivityDelay,slave,slavePos)
+        local screenPos
+        if slave == true then
+            screenPos = slavePos:toScreen() 
+        else
+            local GunRanger = trace.trace(self.gun:getPos(),self.gun:getPos()+self.gun:getForward()*99999,self.filter)                
+            screenPos = GunRanger.HitPos:toScreen()
+        end
+        px, py = screenPos['x'], screenPos['y']
+        
+        
+        local progress = 0
+        if mag == self.magSize and coolDown > 0 and self.magType == "mag" then self.reloadTime = self.magReloadTime else self.reloadTime = self.shellReloadTime end
+
+        if ((ammo - self.lastAmmo) < 0 or ammoType ~= self.lastAmmoType) then // A shot was fired or the ammo type was changed (as of now daktank refills do not exist)
+            self.lastFired = timer.curtime() - sensitivityDelay
+            progress = 0
+        else
+            local elapsedTime = timer.curtime() - self.lastFired
+            progress = elapsedTime / self.reloadTime
+        end
+        self.lastAmmo = ammo
+        self.lastAmmoType = ammoType
+        
+        cutoff = math.ceil(progress * self.fidelity)
+        for i = 1, self.fidelity do 
+            // Transform the polygon to the gun tracker        
+            local poly = self.polies[i]
+            local transformed = {}
+            for j = 1, 4 do 
+                transformed[j] = {x=poly[j].x+px, y=poly[j].y+py}
+            end
+            
+            // Coloring logic
+            local loaded = (coolDown == 0)
+            if not self.simple and self.reloadTime >= 0.5 then // No point rendering it if its any quicker
+                if loaded then render.setColor(self.readyColor)
+                elseif i > cutoff then render.setColor(self.remainReloadColor) 
+                else render.setColor(self.reloadColor) end
+            else
+                if loaded then render.setColor(self.readyColor) 
+                elseif not loaded then render.setColor(self.emptyColor)        
+                else render.setColor(self.remainReloadColor) end
+            end
+            render.drawPoly(transformed)
+        end
+    end
+end
+
+--[[
+This class represents a reload timer that shows how long shells will take to load/the time left.
+Positioned at px,py, with dimensions width,height and color c1
+    - normalTime (float) represents the time it takes for your gun to load a shell (not mag time).
+    - options should be a table consisting of any of the following parameters: 
+        - magType (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
+        - magTime (float) represents how long it takes for your autoloader magazine to reload (must be specified if using a mag)
+        - bckgndCol (color) specifies the color that is used to draw the opaque background. By default, the color Color(0,0,0,100) is used.
+        - fontName (string) specifies the font to use when drawing text. The size is scaled by the element itself. Defaults to Coolvetica.
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.       
+    - in the render function:
+        - coolDown (float) represents the time left for the gun to reload
+        - magOrAmmo (float) represents the number of shells in the magazine, or of the ammunition, depending on your weapon type. 
+]]--
+local ReloadTimer = class("modular_hud_daktank_reload_timer")
+do 
+    function ReloadTimer:initialize(res,px,py,width,height,normalTime,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.width = width * resAdjust * self.scale
+        self.height = height * resAdjust * self.scale
+        self.textSize = 16 * resAdjust * self.scale
+        self.reloadTime = normalTime
+        self.c1 = c1
+        
+        if options["magType"] ~= nil then self.magType = options["magType"] else self.magType = "single" end
+        if options["magTime"] ~= nil then self.magReloadTime = options["magTime"] end
+        if options["bckgndCol"] ~= nil then self.backGroundCol = options["bckgndCol"] else self.backGroundCol = Color(0,0,0,100) end 
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+      
+        self.font = render.createFont(self.fontName,self.textSize,400,0,00000)
+    end
+    
+    function ReloadTimer:render(coolDown,magOrAmmo)
+        render.setColor(self.backGroundCol)
+        render.setFont(self.font)
+        render.drawRect(self.px - self.width/2, self.py - self.height/2, self.width, self.height) 
+        render.setColor(self.c1)
+        render.drawRectOutline(self.px - self.width/2, self.py - self.height/2, self.width, self.height)
+
+        local time = 0           
+        if coolDown == 0 then
+            if self.magType == "mag" and magOrAmmo == 1 then time = self.magReloadTime
+            else time = self.reloadTime end
+        else 
+            time = coolDown
+        end
+        render.drawSimpleText(self.px,self.py,math.round(time,1).."s",1,1)
+    end
+end
+
+return {ReloadIndicator = ReloadIndicator, ReloadTimer = ReloadTimer}

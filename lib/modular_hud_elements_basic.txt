@@ -1,0 +1,476 @@
+--@name Modular Hud Basic Elements
+--@author
+--@client
+
+--[[
+This library contains various elements for use with the modular hud library. 
+
+Classes are indexed by name in a table that is returned when you require this library.
+
+--------------------------------------------------------------------------------------------------------------
+To create new elements, use the following structure:
+local <className> = class("<anything really lol just don't have duplicates>")
+    <class>:initialize(args) 
+    <class>:render(args) 
+
+initialize should be used to define how a hud element should be initialized. 
+    - Initialize any relevant variables to your element, such as position or size, if they don't change during rendering. 
+
+render should be used to define how a hud element should be rendered.
+    - This will be called within a render context, so you should use render functions to draw your element. 
+    - You also have access to any class attribute you defined in initialized
+    
+Remember to add <component name> = <component name> to the returned table at the end of the file. This is used so you can access your classes elsewhere.
+---------------------------------------------------------------------------------------------------------------
+
+What each element does as well as how to call the functions are documented for the base functions added during the release.
+
+Not every element is fully modular (the intention is to demonstrate what *is* possible as well as being functional enough for *most* vehichle huds).
+You could always make something have more callbacks or have automatic alignment and scaling to fit arbitrary fonts. How abstract the user would like
+their elements to be is up to them.
+
+Note: In the function documentation, "By default" or "Defaults to", etc. happens when an option is:
+    - not specified (e.x. options = {scale = 2} means that the option "mode" is not specified)
+    - set to nil (e.x. options = {scale = 2, mode = nil} means that mode is nil.)
+
+Note: Hud elements are scaled not only by their optional scale factor, but also by the Y resolution of your hud.
+    - If a component is made on a different resolution from yours, the positional inputs may not be accurate
+        - The position (10,5) will be (20,10) if you have a resolution 2x that of the resolution the component was made in
+
+Contact (Discord: Len#4767) ((Please read comments before asking, I will try to help but I will likely be busy.))
+]]--
+
+
+// Helper functions -------------------------------------------------------------------------------------------
+
+--[[
+Returns the point (x,y) of a point on a circle defined with center x,y and radius r, with an angle theta.
+]]--
+
+function CirclePoint(x,y,r,theta)
+    theta2 = math.rad(theta)
+    return x + r * math.cos(theta2), y + r * math.sin(theta2)
+end
+
+--[[
+Draws a polygon with center x,y, vertex offsets points, a scale factor and an angle offset.
+    - points should be a table of x,y pairs defining the offsets of the vertices of the polygon, relative to its center.
+        - e.x. {{1,2},{3,4},{5,6}}
+    - scale is relative to its original size (e.x. a scale of 1 does not change anything)
+    - angle is in degrees
+]]--
+function drawPolyOutline(points,x,y,scale,angle)
+    local count = #points
+    for i = 1, count-1 do
+        local curPoint = points[i]
+        local nextPoint = points[i+1]
+        p1x, p1y = CirclePoint(x,y,curPoint[1] * scale, curPoint[2]+angle)
+        p2x, p2y = CirclePoint(x,y,nextPoint[1] * scale, nextPoint[2]+angle)
+        render.drawLine(p1x,p1y,p2x,p2y)
+    end
+    curPoint = points[count]
+    nextPoint = points[1]
+    p1x, p1y = CirclePoint(x,y,curPoint[1] * scale, curPoint[2]+angle)
+    p2x, p2y = CirclePoint(x,y,nextPoint[1] * scale, nextPoint[2]+angle)
+    render.drawLine(p1x,p1y,p2x,p2y)
+end
+
+--[[
+Draws a rectangle centered at x,y, with width w and height h
+]]--
+function drawRectC(x,y,w,h)
+    render.drawRectFast(x-w/2,y-h/2,w,h)
+end
+
+// Element classes should be defined under here. -------------------------------------------------------------
+
+--[[
+This class represents a basic crosshair, with position px,py, radius r1, thickness, mode and color c1
+    - options should be a table consisting of any of the following parameters:    
+        - mode (string) is either "cross" or "circle". Defaults to "cross"
+]]--
+local CrossHair = class("modular_hud_cross_hair")
+do 
+    function CrossHair:initialize(res,px,py,r1,thickness,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.r1 = r1
+        self.thick = thickness
+        self.c1 = c1
+        
+        if options["mode"] ~= nil then self.mode = options["mode"] else self.mode = "cross" end
+    end 
+    
+    function CrossHair:render()
+        render.setColor(self.c1)
+        if self.mode == "cross" then
+            drawRectC(self.px, self.py, self.r1*2, self.thick)
+            drawRectC(self.px, self.py, self.thick, self.r1*2)
+        elseif self.mode == "circle" then
+            render.drawCircle(self.px, self.py, self.r1)
+        end
+    end
+end
+
+--[[
+This class represents a simple orientation diagram of a tank, with position px,py, radius r1 and color c1
+    - options should be a table consisting of any of the following parameters:
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.
+    - in the render function, turretYaw (float) and baseYaw (float) are used to determine the tank's orientation.
+]]--
+local TankOrientation = class("modular_hud_tank_orientation")
+do
+    function TankOrientation:initialize(res,px,py,r1,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.r1 = r1 * resAdjust * self.scale
+        self.c1 = c1
+        
+        self.turretPoly = {{20,180},{60,-90},{20,0}}
+        self.hullPoly = {{50,-90},{42.42,-45},{42.42,45},{42.42,135},{42.42,225}}
+    end
+    
+    function TankOrientation:render(turretYaw, baseYaw)
+        render.setColor(self.c1)
+        render.drawRectOutline(self.px - self.r1/2, self.py - self.r1/2, self.r1, self.r1)
+        drawPolyOutline(self.turretPoly, self.px, self.py, self.r1/130,turretYaw)
+        drawPolyOutline(self.hullPoly, self.px, self.py, self.r1/120,baseYaw)
+    end
+end
+
+--[[
+This class represents a simple sliding compass, with position px,py, dimensions width,height and other configurations.
+    - options should be a table consisting of any of the following parameters:
+        - displayRange (float) represents the total number of degrees displayed on the compass. Defaults to 90.
+        - tickRes (float) represents how many degrees should each tick be spaced by. Defaults to 15.
+        - subTickCount (float) represents how many subticks you want between ticks. Defaults to 1 (none)
+        - tickWidth (float) represents how wide the ticks under the numbers are. Defaults to 1
+        - font (string) specifies the font to use when drawing text. The size is scaled by the element itself. Defaults to Coolvetica.
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.
+]]--
+local SlidingCompass = class("modular_hud_sliding_compass")
+do 
+    function SlidingCompass:initialize(res,px,py,width,height,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.width = width * resAdjust * self.scale
+        self.height = height * resAdjust * self.scale
+        self.textSize = 16 * resAdjust * self.scale
+        
+        self.tickHeight = self.height*15/40
+        self.c1 = c1     
+        
+        if options["displayRange"] ~= nil then self.displayRange = options["displayRange"] else self.displayRange = 90 end
+        if options["tickRes"] ~= nil then self.tickRes = options["tickRes"] else self.tickRes = 15 end
+        if options["subTickCount"] ~= nil then self.subTickCount = options["subTickCount"] else self.subTickCount = 1 end
+        if options["tickWidth"] ~= nil then self.tickWidth = options["tickWidth"] else self.tickWidth = 2 end
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+      
+        self.font = render.createFont(self.fontName,self.textSize,400,0,00000)
+        
+        self.subTickRes = self.tickRes / self.subTickCount // Each tick basically represents this angle
+        
+    end
+    
+    function SlidingCompass:render(bearing)
+        render.setColor(Color(0,0,0,100))
+        render.drawRect(self.px - self.width/2, self.py - self.height/2, self.width, self.height) // 
+        
+        render.setColor(self.c1)
+        p1x, p1y = self.px, self.py+self.height/2
+        render.drawRectOutline(self.px - self.width/2, self.py - self.height/2, self.width, self.height) // 
+        render.drawPoly({{x=p1x,y=p1y},{x=p1x+10,y=p1y+10},{x=p1x-10,y=p1y+10}}) // Pointer to current heading
+        
+        local left = bearing - self.displayRange/2
+        local right = bearing + self.displayRange/2
+        
+        local m1 = math.ceil(left/self.tickRes) // Left most tick index
+        local m2 = math.floor(right/self.tickRes) // Right most tick index
+        local cardinal = {}
+        cardinal[0] = "N"
+        cardinal[90] = "E"
+        cardinal[180] = "S"
+        cardinal[270] = "W"
+        for i = m1, m2 do
+            local frac = (i * self.tickRes - left) / (right - left)
+            local curAngle = (i*self.tickRes % 360)
+            local char = ""
+            if cardinal[curAngle] ~= nil then char = cardinal[curAngle] else char = ""..curAngle end
+            render.drawSimpleText(self.px - self.width/2 + self.width * frac,self.py - self.height*0.25,char,1,1)
+        end
+        
+        local m3 = math.ceil(left/self.subTickRes)
+        local m4 = math.floor(right/self.subTickRes)
+        for i = m3, m4 do
+            local frac = (i * self.subTickRes - left) / (right - left)
+            render.drawRect(self.px - self.width/2 + self.width * frac - self.tickWidth/2,self.py + self.height/2 - self.tickHeight, self.tickWidth, self.tickHeight)
+        end        
+    end
+end
+
+--[[
+This class represents a box with text in it, centered at px,py, with dimensions width,height, a scale size and color c1
+    - textSize is used to directly set the size of the font for this element. Default text size is 16.
+    - options should be a table consisting of any of the following parameters:
+        - useFunc (function) if specified, is called in the render method, taking state and spitting out a new. See more in the render function section below.
+        - useBool (boolean) determinmes whether or not to interpret state as a boolean or float from 0 to 1. By default, state is treated as a float from 0 to 1.
+        - lowCol (color) specifies the color that is treated as logical false or the left bound of a lerp.
+        - highCol (color) specifies the color that is treated as logical true or the right bound of a lerp.
+        - bckgndCol (color) specifies the color that is used to draw the opaque background. By default, the color Color(0,0,0,100) is used.
+        - font (string) specifies the font to use when drawing text. The size is determined by the textSize input. Defaults to Coolvetica.
+    - in the render function:
+        - text (string) is the text to display in the box
+        - state (any) is used to determine how to color the text in the box, through the following process:
+            - if lowCol and highCol are not specified, it will use c1. Otherwise, it will use the following process:
+            - if useFunc is specified, state will be processed through it and the result is used in the next stage:
+                - if useBool is true then it will color the box lowCol or highCol based on whether state is true or false (boolean)
+                - if useBool is false, then it will color the box by lerping between lowcol and highCol, based on state (from 0 to 1)
+]]--
+local TextBox = class("modular_hud_text_box")
+do 
+    function TextBox:initialize(res,px,py,width,height,textSize,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.width = width * resAdjust * self.scale
+        self.height = height * resAdjust * self.scale
+        self.textSize = textSize * resAdjust * self.scale
+        self.c1 = c1
+        
+        if options["useFunc"] ~= nil then self.useFunc = options["useFunc"] end
+        if options["useBool"] ~= nil then self.useBool = options["useBool"] end
+        if options["lowCol"] ~= nil then self.c2 = options["lowCol"] end
+        if options["highCol"] ~= nil then self.c3 = options["highCol"] end
+        if options["bckgndCol"] ~= nil then self.backGroundCol = options["bckgndCol"] else self.backGroundCol = Color(0,0,0,100) end
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+      
+        self.font = render.createFont(self.fontName,self.textSize,400,0,00000)  
+    end
+    
+    function TextBox:render(text, state)
+        render.setColor(self.backGroundCol)
+        render.setFont(self.font)
+        render.drawRect(self.px - self.width/2, self.py - self.height/2, self.width, self.height) 
+        render.setColor(self.c1)
+        render.drawRectOutline(self.px - self.width/2, self.py - self.height/2, self.width, self.height)    
+        
+        if self.c2 ~= nil and self.c3 ~= nil then // Both colors have been specified
+            if self.useFunc ~= nil then state = self.useFunc(state) end    
+            if self.useBool == true then // If state is true/false
+                if state == true then render.setColor(self.c3) else render.setColor(self.c2) end // If the state is true, use highCol, if state is false, use lowCol
+            else // If state is a float
+                render.setColor(self.c2 + (self.c3 - self.c2) * state)
+            end
+        end
+        
+        render.drawSimpleText(self.px,self.py,text,1,1)
+    end
+end
+
+--[[
+This class represents a text object, and only that. It is more optimized than the textbox, as there is less logic involved. It also has alignment, which the textbox lacks.
+It is positioned at px,py, with size textSize, color c1, and options
+    - textSize is used to directly set the size of the font for this element. Default text size is 16.
+    - options should be a table consisting of any of the following parameters:
+        - hAlign (int) specifies the horizontal alignment of the text. Possible values are (0 - left, 1 - middle, 2 - right) justified
+        - vAlign (int) specifies the vertical alignment of the text. Possible values are (0 - top, 1 - middle, 2 - bottom) justified
+        - font (string) specifies the font to use when drawing text. The size is determined by the textSize input. Defaults to Coolvetica.
+]]--
+local TextSimple = class("modular_hud_text_simple")
+do 
+    function TextSimple:initialize(res,px,py,textSize,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.textSize = textSize * resAdjust * self.scale
+        self.c1 = c1
+        
+        if options["hAlign"] ~= nil then self.hAlign = options["hAlign"] else self.hAlign = 1 end        
+        if options["vAlign"] ~= nil then self.vAlign = options["vAlign"] else self.vAlign = 1 end        
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+      
+        self.font = render.createFont(self.fontName,self.textSize,400,0,00000)  
+    end
+    
+    function TextSimple:render(text)
+        render.setColor(self.c1)
+        render.setFont(self.font)     
+        render.drawSimpleText(self.px,self.py,text,self.hAlign,self.vAlign)
+    end
+end
+
+--[[
+This class represents a progress bar, with center px,py, dimensions width,height, font, colors c1,c1,c3, limits min,max and options.
+The color of the progress bar will be mixed between c2 and c3, based on the input value relative to min and max.
+    - c1 represents the border color
+    - c2 represents the color if the input value is at min.
+    - c3 represents the color if the input value is at max.
+    - min/max represent the minimum and maximum values of the progress bar
+    - options should be a table consisting of any of the following parameters:
+        - min (float) determines the minimum value, what is interpretted as 0% progress. Defaults to 0.
+        - max (float) determines the maximum value, what is interpretted as 100% progress. Defaults to 1.
+        - drawText (boolean) determines if text (preffix + value + suffix) should be drawn inside the progress bar or not
+        - autoColor (boolean) determines if the bar should be colored based on progress, or take on the color c1
+        - prefix (string) determines the string to add in front of the text in the progress bar. By default, no prefix will be added.
+        - suffix (string) determines the string to add in front of the text in the progress bar. By default, no suffix will be added.
+        - showPerc (boolean) determines whether the number shown should be a percentage or the raw value
+        - precision (float) determines the decimal place to round the displayed value. By default, values are rounded to the nearest integer.
+        - justifyUD (boolean) determines if the progress bar should progress upwards or rightwards. By default, it will move from left to right.
+        - bckgndCol (color) sets the background color of the box. By default, this will be the default opaque color.
+        - font (string) specifies the font to use when drawing text. The size is scaled by the element itself. Defaults to Coolvetica.
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.    
+    - In the render function, value (float) is used to determine how far the bar has progressed.
+]]--
+local ProgressBar = class("modular_hud_progress_bar")
+do 
+    function ProgressBar:initialize(res,px,py,width,height,c1,c2,c3,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        local resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * resAdjust 
+        self.py = res[2] + py * resAdjust 
+        self.width = width * resAdjust * self.scale
+        self.height = height * resAdjust * self.scale
+        self.textSize = 16 * resAdjust * self.scale
+        self.c1 = c1
+        self.c2 = c2
+        self.c3 = c3
+                
+        if options["min"] ~= nil then self.min = options["min"] else self.min = 0 end
+        if options["max"] ~= nil then self.max = options["max"] else self.max = 1 end
+        if options["drawText"] ~= nil then self.drawText = options["drawText"] end
+        if options["autoColor"] ~= nil then self.autoColor = options["autoColor"] end
+        if options["prefix"] ~= nil then self.prefix = options["prefix"] else self.prefix = "" end
+        if options["suffix"] ~= nil then self.suffix = options["suffix"] else self.suffix = "" end
+        if options["showPerc"] ~= nil then self.showPerc = options["showPerc"] end
+        if options["precision"] ~= nil then self.precision = options["precision"] else self.precision = 0 end
+        if options["justifyUD"] ~= nil then self.justifyUD = options["justifyUD"] end
+        if options["bckgndCol"] ~= nil then self.bckgndCol = options["bckgndCol"] else self.bckgndCol = Color(0,0,0,100) end
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+      
+        self.font = render.createFont(self.fontName,self.textSize,400,0,00000)
+    end
+    
+    function ProgressBar:render(value)
+        render.setColor(self.bckgndCol)
+        render.drawRect(self.px - self.width/2, self.py - self.height/2, self.width, self.height) 
+
+        render.setColor(self.c1)
+        render.drawRectOutline(self.px - self.width/2, self.py - self.height/2, self.width, self.height)    
+        
+        local perc = (value - self.min) / (self.max - self.min)
+        if self.showPerc == true then value = math.round(perc*100,self.precision) else value = math.round(value,self.precision) end
+        if self.autoColor == true then 
+            local curColor = self.c2 + (self.c3 - self.c2) * perc // Lerp between two colors
+            render.setColor(curColor) 
+        else 
+            render.setColor(self.c1) 
+        end
+        
+        local width = self.width-2 // Don't wanna cover up everything
+        local height = self.height-2 // Don't wanna cover up everything
+        if not self.justifyUD then
+            render.drawRect(self.px - width/2, self.py - height/2, width * perc, height)
+        else
+            render.drawRect(self.px - width/2, self.py + height/2 - height * perc, width, height * perc)
+        end
+        
+        render.setColor(self.c1)
+        if self.drawText == true then
+            render.drawSimpleText(self.px, self.py, self.prefix..value..self.suffix, 1, 1)
+        end
+    end
+end
+
+--[[
+This class represents a view border like the one in BF4, centered at x,y with color c1 and scale
+Note: Scaling does not change the thickness of the lines
+    - options should be a table consisting of any of the following parameters:
+        - thick (string) determines the thickness of the lines in the element. If nil, the thickness will be 2.
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.
+]]--
+local BF4ViewBorder = class("modular_hud_bf4_view")
+do
+    function BF4ViewBorder:initialize(res,px,py,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        self.resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * self.resAdjust 
+        self.py = res[2] + py * self.resAdjust
+        self.c1 = c1
+        
+        if options["thick"] ~= nil then self.thick = options["thick"] else self.thick = 2 end
+    end
+    
+    function BF4ViewBorder:render()
+        render.setColor(self.c1)
+        local scale = self.scale * self.resAdjust
+        drawRectC(self.px-280*scale,self.py-180*scale,80*scale,2)
+        drawRectC(self.px-320*scale,self.py-140*scale,2,80*scale)
+        drawRectC(self.px+280*scale,self.py+180*scale,80*scale,2)
+        drawRectC(self.px+320*scale,self.py+140*scale,2,80*scale)
+        drawRectC(self.px+280*scale,self.py-180*scale,80*scale,2)
+        drawRectC(self.px+320*scale,self.py-140*scale,2,80*scale)
+        drawRectC(self.px-280*scale,self.py+180*scale,80*scale,2)
+        drawRectC(self.px-320*scale,self.py+140*scale,2,80*scale)
+    end
+end
+
+--[[
+This class represents a view crosshair like the one in BF4, centered at x,y with color c1 and scale
+Note: Scaling does not change the thickness of the lines
+    - options should be a table consisting of any of the following parameters:
+        - thick (string) determines the thickness of the lines in the element. Defaults to 2.
+        - scale (float) scales the component's size relative to its original size. Defaults to 1.
+]]--
+local BF4ViewCross = class("modular_hud_bf4_crosshair")
+do
+    function BF4ViewCross:initialize(res,px,py,c1,options)
+        if options["scale"] ~= nil then self.scale = options["scale"] else self.scale = 1 end
+        
+        self.resAdjust = res[3]/1080 // Adjust resolution of element 
+        
+        self.px = res[1] + px * self.resAdjust 
+        self.py = res[2] + py * self.resAdjust 
+        self.c1 = c1
+        
+        if options["thick"] ~= nil then self.thick = options["thick"] else self.thick = 2 end
+    end
+    
+    function BF4ViewCross:render()
+        render.setColor(self.c1)
+        local scale = self.scale * self.resAdjust 
+        drawRectC(self.px,self.py+40*scale,2,40*scale)
+        drawRectC(self.px,self.py-40*scale,2,40*scale)
+        drawRectC(self.px+40*scale,self.py,40*scale,2)
+        drawRectC(self.px-40*scale,self.py,40*scale,2)
+        drawRectC(self.px+80*scale,self.py+20*scale,40*scale,2)
+        drawRectC(self.px+80*scale,self.py-20*scale,40*scale,2)
+        drawRectC(self.px-80*scale,self.py+20*scale,40*scale,2)
+        drawRectC(self.px-80*scale,self.py-20*scale,40*scale,2)
+        drawRectC(self.px+160*scale,self.py,40*scale,2)
+        drawRectC(self.px-160*scale,self.py,40*scale,2)
+    end
+end
+
+return {CrossHair = CrossHair, TankOrientation = TankOrientation, SlidingCompass = SlidingCompass, TextBox = TextBox, TextSimple = TextSimple, ProgressBar = ProgressBar, BF4ViewBorder = BF4ViewBorder, BF4ViewCross=BF4ViewCross, GunArcIndicator = GunArcIndicator}

@@ -1,0 +1,121 @@
+--@name
+--@author
+--@shared
+
+--[[
+This library provides a backend for a modular hud.
+
+All the function spassed to the hudClient or hudServer are called without arguments unless specified (e.x. inputClk).
+
+--------------------------------------------------------------------------------------------------------------------
+
+The calling structure is as follows (!function arguments are not shown!):
+                                                                     
+Wire input is changed -> inputClk()
+                                                        DupeFinished hook is called
+                                                                        |
+                                                                        V
+(Server context) ClientInitialized hook is called -> serverInit() -> initSync() -> serverMain()
+                                                                        |
+                                                                        V
+(Client context)                                     clientInit() <- initSync() -> clientMain()
+                                                                        |
+                                                                        V
+                                                                     renderHud()
+When a hudClient object is initialized -> receptions()
+
+--------------------------------------------------------------------------------------------------------------------
+
+How to use these functions may be demonstrated in any of the existing modular hud examples.
+
+Contact (Discord: Len#4767) ((Please read comments before asking, I will try to help but I will likely be busy.))
+]]--
+local hudClient = class("modular_hud_base_client")
+do
+    function hudClient:initialize(sharedMemory,clientInit,clientMain,initSync,timeStep,renderHud,receptions) 
+        self.sharedMemory = sharedMemory       
+        self.timeStep = timeStep
+        
+        self.clientInit = function()
+            clientInit()
+            if player() == owner() then enableHud(nil, true) end
+            timer.create("modular_hud_client_thread_1",self.timeStep,0,self.clientMain)
+            hook.add("DrawHUD", "", self.renderHud)
+        end
+
+        self.clientMain = function()
+            if self.sharedMemory:getVar("Active") == 0 then return end
+            clientMain()
+        end
+        
+        self.initSync = function()
+            initSync()
+            self.clientInit()
+        end
+
+        self.renderHud = function()
+            if self.sharedMemory:getVar("Active") == 0 then return end
+            renderHud()    
+        end
+        
+        self.receptions = receptions
+        receptions()
+        self.sharedMemory:receiveVar("Active",nil)
+        
+        self.sharedMemory:receiveSync(self.initSync)
+    end
+end
+
+local hudServer = class("modular_hud_base_server")
+do
+    function hudServer:initialize(sharedMemory,serverInit,serverMain,initSync,inputChecks,timeStep,inputClk,dupeFinished,dupeFinishTime)
+        self.sharedMemory = sharedMemory
+        self.sharedMemory:addLocalVar("Active",0,"Float")
+
+        self.timeStep = timeStep
+        
+        self.serverInit = function()
+            serverInit()
+            self.initSync()
+            timer.create("modular_hud_server_thread_1",self.timeStep,0,self.serverMain)          
+            self.sharedMemory:sendVar("Active",0) 
+        end
+                 
+        self.serverMain = function()
+            if self.sharedMemory:getVar("Active") == 0 then return end
+            serverMain()    
+        end
+        
+        self.initSync = function()
+            checkInputEnts(inputChecks,function()
+                initSync()    
+                self.sharedMemory:sync()                
+            end)
+
+        end
+        
+        self.dupeFinished = dupeFinished
+        
+        hook.add("input", "", function(name, value)
+            if name == "Active" then
+                self.sharedMemory:sendVar("Active",value) 
+            end
+            inputClk(name,value)    
+        end)
+        
+        hook.add("ClientInitialized","",function(ply)
+            if ply ~= owner() then return end
+            self.serverInit()
+        end)
+        
+        hook.add("DupeFinished","",function(x) 
+            dupeFinished()
+            
+            timer.simple(dupeFinishTime,function() // I don't like this but some entities only finish initializing some time after dupefinish is called.
+                self.initSync()    
+            end) 
+        end) // It's a headache dealing with props spawning in before the e2 is finished
+    end
+end
+
+return {client = hudClient, server = hudServer}

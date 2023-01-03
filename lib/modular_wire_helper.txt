@@ -1,0 +1,77 @@
+--@name Modular Wire Helper Library
+--@author
+--@server
+
+--[[
+This library provides extra helper functions for wire.
+
+Note that the parseE2IO and setIO functions are purely for convenience (some may disagree), up to you.
+If you'd like to, use the normal starfall wire I/O library. 
+
+Contact (Discord: Len#4767) ((Please read comments before asking, I will try to help but I will likely be busy.))
+]]--
+
+--[[
+Function that parses a string similar to the e2 style input annotations 
+(e.x) @inputs Gun:entity, Base:entity, Turret:entity, Fuel, Speed
+    - If a type is not specified, it will assume float
+    - Unlike in e2, there is no functionality for annotating multiple variables with one type (e.x. [Gun, Base, Turret]:entity
+]]--
+function parseE2IO(inputStr)
+    if inputStr == "" then return nil end
+    
+    local tbl = {}
+    local temp = string.explode(" ", inputStr, nil)
+    for k, v in ipairs(temp) do
+        local pair = string.explode(":",v,nil)
+        local name = pair[1]
+        local type = "number" // If type is not designated, remain number
+        if #pair == 2 then type = pair[2] end // If type is designated
+        tbl[name] = type
+    end
+    return tbl
+end
+
+--[[
+Wrapper function for wire.adjustPorts, purely aesthetical, kind of redundant.
+]]--
+function setIO(inputs,outputs)
+    wire.adjustPorts(inputs,outputs)
+end
+
+--[[
+Checks the inputs of the current chip, and checkes each input in inputs and makes sure they are valid entities.
+If an entity should be wired but isn't, then it will tell you
+I don't know how else I would check this, isValid isn't ideal but it works for the majority of applications
+    - inputs is a string containing the input names separated by spaces (e.x. inputs = "Gun1 Gun2 Gun3 Base Turret")
+    - passCallBack if specified, will be called if all entities are wired propperly
+    - failCallBack if specified, will be called if a entity has not been wired propperly 
+]]--
+function checkInputEnts(inputs,passCallBack,failCallBack)
+    criticalWires = string.explode(" ", inputs, nil)
+    local passed = true
+    for k, v in ipairs(criticalWires) do
+        if not wire.ports[v]:isValid() then
+            print("Critical entity must be wired: "..v)
+            passed = false
+        end
+    end
+    
+    if passed then 
+        print("Critical entities propperly wired")
+        if passCallBack ~= nil then passCallBack() end
+    else
+        if failCallBack ~= nil then failCallBack() end
+    end
+end
+
+--[[
+If called with a name and callback, then it will add a hook that calls the callback with the value, if the input is updatted
+]]--
+function inputClk(name, callback)
+    hook.add("input", ""..name, function(inputName, inputValue)
+        if inputName == name then
+            callback(inputValue)
+        end    
+    end)
+end
