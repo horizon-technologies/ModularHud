@@ -48,6 +48,7 @@ That being said, here are some tips for optimization:
     - If you are running something very often, try to make it less usage intensive
     - Try minimizing the amount of included libraries you have (the libraries already make the SF a little larger than I'd like, including more would make the file size increase).
     - With stuff like the hud elements, if it's a simple thing that can be drawn using the normal render functions, there's no reason to make an object.
+    - If you can calculate something client side, don't calculate and send it from serverside.
     - More of an experimental observation, but it may be worth increasing the update rate of your main thread instead of adding another (up to a point).
         - On this point, be mindful of the frequency and number of net messages being sent
 ===========================================================================================================================================================================
@@ -65,7 +66,7 @@ Inputs:
     - CamAng:angle -> Cam controller CamAng output
     - CamHitPos:vector -> Cam controller HitPos output
     - Crew -> Crew on daktank core 
-    - HP -> Health on daktank core
+    - Health -> Health on daktank core
     - SMCoolDown -> Cooldown output of any smoke launcher
     - FLIRIn -> FLIR toggle input from numpad or pod controller
 Outputs:
@@ -75,27 +76,44 @@ Outputs:
 
 if player() ~= owner() then return end // Don't touch this, we don't want it erroring on other people
 
-// Settings ------------------------------------------------------------------------------------------------------------------------
-// Update rate settings
+// Settings ===============================================================================================================================================================
+
+// Update rate settings:
 // Be VERY Careful, running either of these too often may dramatically increase their usage.
 // Note: these measurements are timesteps, i.e. the delay between executions (period). Stuff like interval from e2 
 // represent how often something happens for a given time, usually per second (frequency)
+
 local CLIENT_TIME_STEP = 0.1 // Time per cycle (in seconds) that Information is polled at for clientside purposes
 local SERVER_TIME_STEP = 0.1 // Time per cycle (in seconds) that information is polled at on the server, which is then sent to the client
 local DUPE_FINISH_TIME = 5 // Time (in seconds) after a dupe is "finished" to re-initialize (sometimes SENTs or whatever take time after spawning to init?)
 
-// Hud settings
+// Hud settings:
 local PrimCol = Color(255,191,0,255) // This variable represents the primary color of your hud. Individual hud elements can be colored separately if needed.
 
-// Miscellaneous settings
+// Conversion settings:
 local SPEED_CONV = 0.06858 // Conversion factor from GMU/S to desired speed 0.042613636363636 (for MPH) and 0.06858 (for KPH)
-local SPEED_UNIT = "KPH"  
+local SPEED_UNIT = "KPH" // Unit displayed next to speed indicator
+
+local DIST_CONV = 1/39.37 // Conversion factor from GMU to desired distance 1/39.37 (for m)
+local DIST_UNIT = "m" // Unit displayed next to unit indicator
+
+// Tank Diagram Settings:
+// If your hull/turret is consistently off by a constant amount, modify these using multiples of 90
+local tankYawOffset = 90
+local turretYawOffset = 0 
+
+// If your hull/turret rotates in the wrong direction, set these to +- 1 as applicable
+local tankYawDirection = -1
+local turretYawDirection = -1
+
+// Don't edit under here unless you want to modify how the hud works ======================================================================================================
 
 // This table defines the variables that will be shared between server and client, managed by the shared_memory_2 library
 // Similar to @persist in e2, the variables persist unless changed. If it is updated on the server, it will update the client and vice versa.
 // Use the format <variable name> = "<Type>".
 // NOTE: Active = "Float" is always added to this table by the backend, do not list it here.
 // NOTE: SharedVars should be uppercased here, unlike lowercased with wire I/O types.
+// NOTE: it is fine if some of these variables are only set/get once (e.x. initialization), since they won't be referenced later.
 SharedVars = {    
     Gun1 = "Entity",
     Gun1ReloadTime = "Float", 
@@ -104,6 +122,7 @@ SharedVars = {
     Gun1AmmoType = "String",
     Gun1ShotsLeft = "Float",
     Gun1TotalAmmo = "Float",
+    Gun1HasMag = "Boolean",
     Gun1Penetration = "Float",
     
     Gun2 = "Entity",
@@ -113,7 +132,8 @@ SharedVars = {
     Gun2AmmoType = "String",
     Gun2ShotsLeft = "Float",
     Gun2TotalAmmo = "Float",
-
+    Gun2HasMag = "Boolean",
+    
     Gun3 = "Entity",
     Gun3ReloadTime = "Float", 
     Gun3MagReloadTime = "Float", 
@@ -121,14 +141,15 @@ SharedVars = {
     Gun3AmmoType = "String",
     Gun3ShotsLeft = "Float",
     Gun3TotalAmmo = "Float",
-
+    Gun3HasMag = "Boolean",
+    
     Turret = "Entity", 
     Base = "Entity", 
     CamYaw = "Float",
     CamDist = "Float",
     FOV = "Float",
     Crew = "Float",
-    HP = "Float",
+    Health = "Float",
     FLIREnabled = "Boolean",
     SMCoolDown = "Float",
     ServerUS = "Float"
@@ -156,10 +177,6 @@ if CLIENT then
     local TurretAng = 0
     local BaseAng = 0
     
-    // Misc Constants
-    local MAX_HP = 0
-    local MAX_CREW = 0
-    
     // Hud elements
     local hudElem = {} // Table containing hud elements
     local hideHud = false // Whether or not to hide parts of the hud
@@ -177,7 +194,7 @@ if CLIENT then
     end
     
     local clientMain = function() // Called in a loop, after clientInit is called
-        Speed = math.round(Base:getVelocity():getLength() * SPEED_CONV)    
+        Speed = math.round(Base:getVelocity():getLength() * SPEED_CONV)
         TurretAng = Turret:getAngles().yaw
         BaseAng = Base:getAngles().yaw
     end
@@ -189,17 +206,17 @@ if CLIENT then
        
         hudElem["ReloadCross1"]:render(smClient:getVar("Gun1CoolDown"),smClient:getVar("Gun1ShotsLeft"),smClient:getVar("Gun1TotalAmmo"),0,0)
         
-        hudElem["Rangefind"]:render(math.round(smClient:getVar("CamDist")).."m")
+        hudElem["Rangefind"]:render(math.round(smClient:getVar("CamDist")*DIST_CONV)..DIST_UNIT)
         hudElem["Penetration"]:render(math.floor(smClient:getVar("Gun1Penetration")).."mm")
         
         if not hideHud then hudElem["Compass"]:render(90-smClient:getVar("CamYaw")) end
         
-        hudElem["Orientation"]:render(180-TurretAng,90-BaseAng) // Entity angles are funny so we have to add/subtract multiples of 90
+        hudElem["Orientation"]:render(turretYawOffset+TurretAng*turretYawDirection,tankYawOffset+BaseAng*tankYawDirection)
         
         hudElem["SpeedText"]:render(""..Speed.." "..SPEED_UNIT)
         hudElem["CrewText"]:render("Crew: "..smClient:getVar("Crew").." / "..MAX_CREW)
         
-        hudElem["FuelBar"]:render(smClient:getVar("HP"))
+        hudElem["FuelBar"]:render(smClient:getVar("Health"))
         
         hudElem["Ammo1Text"]:render(smClient:getVar("Gun1AmmoType").." | "..smClient:getVar("Gun1ShotsLeft").."/"..smClient:getVar("Gun1TotalAmmo"),smClient:getVar("Gun1CoolDown"))
         hudElem["Ammo2Text"]:render(smClient:getVar("Gun2AmmoType").." | "..smClient:getVar("Gun2ShotsLeft").."/"..smClient:getVar("Gun2TotalAmmo"),smClient:getVar("Gun2CoolDown"))
@@ -216,27 +233,26 @@ if CLIENT then
         hudElem["ViewBorder"]:render()
         hudElem["ViewCross"]:render()
         
-        // Example of using the normal render functions here     
-        render.drawText(cenX+800,cenY+400,"CLIENT US: "..math.round(cpuAverage()*1000000),0) 
-        render.drawText(cenX+800,cenY+420,"SERVER US: "..smClient:getVar("ServerUS"),0)        
+        // Example of using the normal render functions here  
+        local resAdjust = RES[3]/1080   
+        render.drawText(cenX+800*resAdjust,cenY+400*resAdjust,"CLIENT US: "..math.round(cpuAverage()*1000000),0) 
+        render.drawText(cenX+800*resAdjust,cenY+420*resAdjust,"SERVER US: "..smClient:getVar("ServerUS"),0)        
     end
     
     local initSync = function() // Called after the server sends information to the client, via the function defined by the serverside initSync
         // You should initialize your hud elements here
         // Do note that you have access to anything sent by the initial sync and the default values of other variables in the shared memory.
-        
         Base = smClient:getVar("Base") // Example of setting normal clientside variables for use in anything clientside
         Turret = smClient:getVar("Turret")
         
-        MAX_CREW = smClient:getVar("Crew")
-        MAX_HP = smClient:getVar("HP")
-        
+        MAX_CREW = smClient:getVar("Crew") // This variable will change when the chip runs, so save it now (first recorded value)
+        MAX_Health = smClient:getVar("Health")
         
         // You can find out how to initialize these hud elements by their documentation in the files where they are defined
         hudElem["CrossHair"] = MHEBasic["CrossHair"]:new(RES,0,0,10,2,PrimCol,{})
 
         hudElem["ReloadCross1"] = MHEDak["ReloadIndicator"]:new(RES,10,12,32,smClient:getVar("Gun1"),smClient:getVar("Gun1ReloadTime"),
-        {simple=false,magType="mag",magTime=smClient:getVar("Gun1MagReloadTime"),magSize=smClient:getVar("Gun1ShotsLeft")})
+        {simple=false,hasMag=smClient:getVar("Gun1HasMag"),magTime=smClient:getVar("Gun1MagReloadTime"),magSize=smClient:getVar("Gun1ShotsLeft")})
         
         hudElem["Rangefind"] = MHEBasic["TextSimple"]:new(RES,60,50,16,PrimCol,{hAlign = 0})
         hudElem["Penetration"] = MHEBasic["TextSimple"]:new(RES,-60,50,16,PrimCol,{hAlign = 2})
@@ -247,7 +263,7 @@ if CLIENT then
         hudElem["SpeedText"] = MHEBasic["TextBox"]:new(RES,380,-50,80,30,16,PrimCol,{})
         hudElem["CrewText"] = MHEBasic["TextBox"]:new(RES,380,0,80,30,16,PrimCol,{})
         hudElem["FuelBar"] = MHEBasic["ProgressBar"]:new(RES,380,50,80,30,PrimCol,Color(150,0,0),Color(0,150,0),
-        {min = 0, max = MAX_HP, drawText=true,autoColor=true,suffix=" HP",justifyUD=true})
+        {min = 0, max = MAX_Health, drawText=true,autoColor=true,suffix=" Health",justifyUD=true})
     
         hudElem["Ammo1Text"] = MHEBasic["TextBox"]:new(RES,-400,-50,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
         hudElem["Ammo2Text"] = MHEBasic["TextBox"]:new(RES,-400,0,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
@@ -264,17 +280,22 @@ if CLIENT then
         
         hudElem["ViewBorder"] = MHEBasic["BF4ViewBorder"]:new(RES,0,0,PrimCol,{})
         hudElem["ViewCross"] = MHEBasic["BF4ViewCross"]:new(RES,0,0,PrimCol,{})
+        
+        print(Color(0,255,0),"Modular Hud V1 Daktank Initialized.")
+        print(Color(255,93,0),"Type !hidehud to hide your compass for use in the gamemode")
     end
     
     local receptions = function() // These are ran by the hud to specify how the client should react if a variable is updated over the shared memory
-        // NOTE: YOU SHOULD MAKE SURE TO RECEIVE ALL VARIABLES IN YOUR SHARED MEMORY (Active and anything defined in SharedVars
+        // NOTE: YOU SHOULD MAKE SURE TO RECEIVE ALL VARIABLES IN YOUR SHARED MEMORY (Active and anything defined in SharedVars 
         // callback can be specified or nil, if you just want to receive.
         // smClient:receiveVar("<variable name>",<callback>)
+        // Variables which are set only once, in the serverside initSync function, do not need to be specified here, as the synchronization copies them over.
+        // The reason we have these is to "listen" for the net messages. If we don't, we will never receive them.
         
-        smClient:receiveVar("Gun1CoolDown",nil)    smClient:receiveVar("Gun1ShotsLeft",nil)   smClient:receiveVar("Gun1TotalAmmo",nil)    smClient:receiveVar("Gun1AmmoType",nil)   smClient:receiveVar("Gun1Penetration",nil)
+        smClient:receiveVar("Gun1CoolDown",nil)    smClient:receiveVar("Gun1ShotsLeft",nil)   smClient:receiveVar("Gun1TotalAmmo",nil)    smClient:receiveVar("Gun1AmmoType",nil) smClient:receiveVar("Gun1Penetration",nil)
         smClient:receiveVar("Gun2CoolDown",nil)    smClient:receiveVar("Gun2ShotsLeft",nil)   smClient:receiveVar("Gun2TotalAmmo",nil)    smClient:receiveVar("Gun2AmmoType",nil)
         smClient:receiveVar("Gun3CoolDown",nil)    smClient:receiveVar("Gun3ShotsLeft",nil)   smClient:receiveVar("Gun3TotalAmmo",nil)    smClient:receiveVar("Gun3AmmoType",nil)
-        smClient:receiveVar("CamYaw",nil)   smClient:receiveVar("CamDist",nil)   smClient:receiveVar("Crew",nil)   smClient:receiveVar("HP",nil)   smClient:receiveVar("ServerUS",nil)   
+        smClient:receiveVar("CamYaw",nil)   smClient:receiveVar("CamDist",nil)   smClient:receiveVar("Crew",nil)   smClient:receiveVar("Health",nil)   smClient:receiveVar("ServerUS",nil)   
         smClient:receiveVar("SMCoolDown",nil)   smClient:receiveVar("FOV",nil) smClient:receiveVar("FLIREnabled",nil)
     end
     
@@ -284,20 +305,36 @@ if CLIENT then
 elseif SERVER then
     // All the things that happen here happen in the SERVER context. You can't access CLIENT only things from here.
     setIO(
-        parseE2IO("Gun:entity Gun2:entity Gun3:entity Turret:entity Base:entity Active FOV CamAng:angle CamHitPos:vector Crew HP SMCoolDown FLIRIn"),
+        parseE2IO("Gun1:entity Gun2:entity Gun3:entity Turret:entity Base:entity Active FOV CamAng:angle CamHitPos:vector Crew Health SMCoolDown FLIRIn"),
         parseE2IO("FLIROut")
     )
     
     // Enter the names of entities which must be wired to avoid errors (separated by spaces) and without type annotations
-    inputChecks = "Gun Gun2 Gun3 Turret Base"
+    checkInputEnts("Turret Base") // A tank can have no guns at all, but it must have a baseplate. Turret should be wired to the baseplate if no turret exists.
         
     // These are used repeatedly, so I put them into a table
-    local Gun = wire.ports.Gun
+    local Gun1 = wire.ports.Gun1
     local Gun2 = wire.ports.Gun2
     local Gun3 = wire.ports.Gun3
-    local gwl = wire.getWirelink(Gun)
+    
+    local gwl1 = wire.getWirelink(Gun1)      
     local gwl2 = wire.getWirelink(Gun2)
     local gwl3 = wire.getWirelink(Gun3) 
+    
+    // Checks if a daktank gun has a magazine
+    function hasMag(gwl) 
+        return gwl ~= nil and table.hasValue(gwl:outputs(),"MagazineRounds") // Is the gun valid? If so, does it use a magazine
+    end
+    
+    local gun1HasMag = hasMag(gwl1)
+    local gun2HasMag = hasMag(gwl2)
+    local gun3HasMag = hasMag(gwl3)
+
+    local gun1ShotsName, gun2ShotsName, gun3ShotsName
+    if gun1HasMag == true then gun1ShotsName = "MagazineRounds" else gun1ShotsName = "Ammo" end
+    if gun2HasMag == true then gun2ShotsName = "MagazineRounds" else gun2ShotsName = "Ammo" end
+    if gun3HasMag == true then gun3ShotsName = "MagazineRounds" else gun3ShotsName = "Ammo" end
+    
     local Turret = wire.ports.Turret
     local Base = wire.ports.Base
     
@@ -309,33 +346,29 @@ elseif SERVER then
     
     local serverInit = function() // Called when the server initializes? (Called after the "ClientInitialized" hook is triggered)
         // If you want to add extra loops to your hud, you can add them here.
---[[
-        timer.create("updateCamYaw",1/66,0,function() // Add a new "loop" running at 100ms delay, to transmit cam angle data
-            smServer:sendVar("CamYaw",wire.ports.CamAng.yaw) // The other wired inputs do not need to be updated nearly as often, and this will be choppy if ran too slow
-        end)    
-]]
+        
     end
     
     local serverMain = function() // Called in a loop, after serverInit is called. Update rate is defined in the hud's initialization
         // You should update the variabes you need to render your hud elements here, mainly variables for wire inputs or server only info
-        if Gun:isValid() then // We don't want to crash if our gun is shot off
-            smServer:sendVar("Gun1CoolDown",gwl['Cooldown'])
-            smServer:sendVar("Gun1ShotsLeft",gwl['MagazineRounds'])
-            smServer:sendVar("Gun1TotalAmmo",gwl['Ammo'])
-            smServer:sendVar("Gun1AmmoType",dakAmmoShort(gwl['AmmoType']))
-            smServer:sendVar("Gun1Penetration",gwl['Penetration'])
+        if Gun1:isValid() then // We don't want to crash if our gun is shot off
+            smServer:sendVar("Gun1CoolDown",gwl1['Cooldown'])
+            smServer:sendVar("Gun1ShotsLeft",gwl1[gun1ShotsName])
+            smServer:sendVar("Gun1TotalAmmo",gwl1['Ammo'])
+            smServer:sendVar("Gun1AmmoType",dakAmmoShort(gwl1['AmmoType']))
+            smServer:sendVar("Gun1Penetration",gwl1['Penetration'])
         end
         
         if Gun2:isValid() then // We don't want to crash if our gun is shot off
             smServer:sendVar("Gun2CoolDown",gwl2['Cooldown']) 
-            smServer:sendVar("Gun2ShotsLeft",gwl2['Ammo']) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
+            smServer:sendVar("Gun2ShotsLeft",gwl2[gun2ShotsName]) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
             smServer:sendVar("Gun2TotalAmmo",gwl2['Ammo'])
             smServer:sendVar("Gun2AmmoType",dakAmmoShort(gwl2['AmmoType'])) 
         end
         
         if Gun3:isValid() then // We don't want to crash if our gun is shot off
             smServer:sendVar("Gun3CoolDown",gwl3['Cooldown']) 
-            smServer:sendVar("Gun3ShotsLeft",gwl3['Ammo']) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
+            smServer:sendVar("Gun3ShotsLeft",gwl3[gun3ShotsName]) // Set this to 'MagazineRounds' instead of 'Ammo' if you have a magazine
             smServer:sendVar("Gun3TotalAmmo",gwl3['Ammo'])
             smServer:sendVar("Gun3AmmoType",dakAmmoShort(gwl3['AmmoType'])) 
         end
@@ -344,7 +377,7 @@ elseif SERVER then
         smServer:sendVar("CamDist",Base:getPos():getDistance(wire.ports.CamHitPos))
         smServer:sendVar("FOV",wire.ports.FOV)
         smServer:sendVar("Crew",wire.ports.Crew) 
-        smServer:sendVar("HP",wire.ports.HP) 
+        smServer:sendVar("Health",wire.ports.Health) 
         smServer:sendVar("ServerUS",math.round(cpuAverage()*1000000)) 
         smServer:sendVar("SMCoolDown",wire.ports.SMCoolDown) 
         smServer:sendVar("FLIREnabled",FLIROut==1)
@@ -354,21 +387,41 @@ elseif SERVER then
         // You should set the variables you need to create your hud elements here, as well as any initialized values (e.x. max fuel)
         // Use the following structure:
         // <variable name> = <variable>
-        smServer:setVars({
-            Gun1 = Gun, 
-            Gun1ReloadTime = gwl['MaxCooldown'], 
-            Gun1MagReloadTime = gwl['ReloadTime'], 
-            Gun1ShotsLeft = gwl["MagazineRounds"],
-            Gun2 = Gun2, 
-            Gun2ReloadTime = gwl2['MaxCooldown'], 
-            Gun2MagReloadTime = gwl2['ReloadTime'],
-            Gun3 = Gun3,
-            Gun3ReloadTime = gwl3['MaxCooldown'], 
-            Gun3MagReloadTime = gwl3['ReloadTime'], 
+        if Gun1:isValid() then // Otherwise the wirelink is nil and accessing them gives an error
+            smServer:setVars({
+                Gun1 = Gun1, 
+                Gun1ReloadTime = gwl1['MaxCooldown'], 
+                Gun1MagReloadTime = gwl1['ReloadTime'], 
+                Gun1ShotsLeft = gwl1["MagazineRounds"],
+                Gun1HasMag = gun1HasMag
+            })
+        end
+        
+        if Gun2:isValid() then
+            smServer:setVars({
+                Gun2 = Gun2, 
+                Gun2ReloadTime = gwl2['MaxCooldown'], 
+                Gun2MagReloadTime = gwl2['ReloadTime'], 
+                Gun2ShotsLeft = gwl2["MagazineRounds"],
+                Gun2HasMag = gun2HasMag
+            })
+        end
+        
+        if Gun3:isValid() then
+            smServer:setVars({
+                Gun3 = Gun3, 
+                Gun3ReloadTime = gwl3['MaxCooldown'], 
+                Gun3MagReloadTime = gwl3['ReloadTime'], 
+                Gun3ShotsLeft = gwl3["MagazineRounds"],
+                Gun3HasMag = gun3HasMag
+            })
+        end
+    
+        smServer:setVars({            
             Turret = Turret, 
             Base = Base, 
             Crew = wire.ports.Crew,
-            HP = wire.ports.HP
+            Health = wire.ports.Health
         })   
     end
     
@@ -393,5 +446,5 @@ elseif SERVER then
         end     
     end)
     
-    hudServer = HudBase["server"]:new(smServer,serverInit,serverMain,initSync,inputChecks,SERVER_TIME_STEP,inputClk,dupeFinished,DUPE_FINISH_TIME) // Don't touch this
+    hudServer = HudBase["server"]:new(smServer,serverInit,serverMain,initSync,SERVER_TIME_STEP,inputClk,dupeFinished,DUPE_FINISH_TIME) // Don't touch this
 end
