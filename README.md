@@ -5,6 +5,12 @@ An implementation of a modular HUD in SF for Garry's Mod
 - Public SF HUDs for ACF/Daktank have not proliferated nearly as much as I thought they would
 - Taking advantage of SF's distinction between client and server to achieve better optimization than E2 can offer for the same capabiliities
 
+# Demo
+![image](https://user-images.githubusercontent.com/109800352/210301162-1db72574-db24-42d1-9156-e32a79638dbd.png)
+
+# Status
+- Currently only a daktank example hud has been created. If the time presents itself, an ACF example may be made.
+
 # Installation Instructions:
 1. Download the zip folder and unzip it
 2. Locate your starfall directory
