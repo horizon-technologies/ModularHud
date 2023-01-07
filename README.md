@@ -20,9 +20,9 @@ An implementation of a modular HUD in SF for Garry's Mod
         - `starfall\lib\modular_hud_base.txt`
         - `starfall\lib\modular_hud_elements_base.txt`
         - `starfall\lib\modular_hud_elements_daktank.txt`
-        - `starfall\lib\modular_shared_memory_2.txt`
+        - `starfall\lib\modular_shared_memory_3.txt`
         - `starfall\lib\modular_wire_helper.txt`
-        - `starfall\modular_hud_daktank_example.txt`
+        - `starfall\modular_hud_v1_(public_release)_(daktank).txt`
 
 # Notes:
 - The HUD elements aren't completely modular, and could be improved (e.x. autocalculating alignments for text in boxes). At the end of the day, the level of abstraction is up to the user to decide. The HUD elements are just there to provide basic functionality, and to demonstrate what is possible.
