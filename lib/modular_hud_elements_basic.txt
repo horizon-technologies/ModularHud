@@ -170,6 +170,7 @@ do
         self.textSize = 16 * resAdjust * self.scale
         
         self.tickHeight = self.height*15/40
+        self.subTickHeight = self.height*10/40
         self.c1 = c1     
         
         if options["displayRange"] ~= nil then self.displayRange = options["displayRange"] else self.displayRange = 90 end
@@ -192,7 +193,7 @@ do
         p1x, p1y = self.px, self.py+self.height/2
         render.drawRectOutline(self.px - self.width/2, self.py - self.height/2, self.width, self.height) // 
         render.drawPoly({{x=p1x,y=p1y},{x=p1x+10,y=p1y+10},{x=p1x-10,y=p1y+10}}) // Pointer to current heading
-        
+ 
         local left = bearing - self.displayRange/2
         local right = bearing + self.displayRange/2
         
@@ -203,6 +204,7 @@ do
         cardinal[90] = "E"
         cardinal[180] = "S"
         cardinal[270] = "W"
+--[[
         for i = m1, m2 do
             local frac = (i * self.tickRes - left) / (right - left)
             local curAngle = (i*self.tickRes % 360)
@@ -217,6 +219,21 @@ do
             local frac = (i * self.subTickRes - left) / (right - left)
             render.drawRect(self.px - self.width/2 + self.width * frac - self.tickWidth/2,self.py + self.height/2 - self.tickHeight, self.tickWidth, self.tickHeight)
         end        
+]]        
+        local m3 = math.ceil(left/self.subTickRes)
+        local m4 = math.floor(right/self.subTickRes)
+        for i = m3, m4 do
+            local frac = (i * self.subTickRes - left) / (right - left)
+            if i * self.subTickRes % 15 == 0 then
+                local curAngle = (i*self.subTickRes % 360)
+                local char = ""
+                if cardinal[curAngle] ~= nil then char = cardinal[curAngle] else char = ""..curAngle end
+                render.drawSimpleText(self.px - self.width/2 + self.width * frac,self.py - self.height*0.25,char,1,1)
+                render.drawRect(self.px - self.width/2 + self.width * frac - self.tickWidth/2,self.py + self.height/2 - self.tickHeight, self.tickWidth, self.tickHeight)
+            else
+                render.drawRect(self.px - self.width/2 + self.width * frac - self.tickWidth/2,self.py + self.height/2 - self.subTickHeight, self.tickWidth, self.subTickHeight)
+            end
+        end 
     end
 end
 
@@ -365,7 +382,7 @@ do
         if options["precision"] ~= nil then self.precision = options["precision"] else self.precision = 0 end
         if options["justifyUD"] ~= nil then self.justifyUD = options["justifyUD"] end
         if options["bckgndCol"] ~= nil then self.bckgndCol = options["bckgndCol"] else self.bckgndCol = Color(0,0,0,100) end
-        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
+        if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end    
       
         self.font = render.createFont(self.fontName,self.textSize,400,0,00000)
     end

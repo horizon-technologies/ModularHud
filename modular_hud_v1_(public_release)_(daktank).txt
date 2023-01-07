@@ -5,7 +5,7 @@
 --@include lib/modular_hud_elements_basic.txt
 --@include lib/modular_hud_base.txt
 --@include lib/modular_wire_helper.txt
---@include lib/modular_shared_memory_2.txt
+--@include lib/modular_shared_memory_3.txt
 
 --[[
 MODULAR HUD V1 PUBLIC RELEASE (Daktank version)
@@ -115,6 +115,8 @@ local turretYawDirection = -1
 // NOTE: SharedVars should be uppercased here, unlike lowercased with wire I/O types.
 // NOTE: it is fine if some of these variables are only set/get once (e.x. initialization), since they won't be referenced later.
 SharedVars = {    
+    Active = "Float",
+    
     Gun1 = "Entity",
     Gun1ReloadTime = "Float", 
     Gun1MagReloadTime = "Float", 
@@ -157,7 +159,7 @@ SharedVars = {
 
 // Make sure to require the libraries you are including here.
 WireHelper = require("lib/modular_wire_helper.txt") // Useful helper functions for wiremod in SF
-SharedMemory = require("lib/modular_shared_memory_2.txt") // Class representing a shared (synced) memory accessible to both client and server
+SharedMemory = require("lib/modular_shared_memory_3.txt") // Class representing a shared (synced) memory accessible to both client and server
 MHEBasic = require("lib/modular_hud_elements_basic.txt") // Addable HUD elements that are intended for vehichles, but could be used for normal huds?
 MHEDak = require("lib/modular_hud_elements_daktank.txt") // Addable HUD elements that only work for daktank
 HudBase = require("lib/modular_hud_base.txt") // Class repressenting the backend of the hud, deals with hud creation and handling hooks
@@ -165,7 +167,7 @@ HudBase = require("lib/modular_hud_base.txt") // Class repressenting the backend
 if CLIENT then
     // All the things that happen here happen in the CLIENT context. You can't access SERVER only things from here.
     
-    smClient = SharedMemory:new() // Don't modify this, we use it to represent the client in the shared memory
+    smClient = SharedMemory:new(SharedVars) // Don't modify this, we use it to represent the client in the shared memory
     
     // Include your variables here -------------------------------------------------------------------------------------------------
     // The variables defined here will be accessible to anything within the client context.
@@ -236,7 +238,9 @@ if CLIENT then
         // Example of using the normal render functions here  
         local resAdjust = RES[3]/1080   
         render.drawText(cenX+800*resAdjust,cenY+400*resAdjust,"CLIENT US: "..math.round(cpuAverage()*1000000),0) 
-        render.drawText(cenX+800*resAdjust,cenY+420*resAdjust,"SERVER US: "..smClient:getVar("ServerUS"),0)        
+        render.drawText(cenX+800*resAdjust,cenY+420*resAdjust,"SERVER US: "..smClient:getVar("ServerUS"),0)      
+        
+        
     end
     
     local initSync = function() // Called after the server sends information to the client, via the function defined by the serverside initSync
@@ -283,25 +287,13 @@ if CLIENT then
         
         print(Color(0,255,0),"Modular Hud V1 Daktank Initialized.")
         print(Color(255,93,0),"Type !hidehud to hide your compass for use in the gamemode")
-    end
-    
-    local receptions = function() // These are ran by the hud to specify how the client should react if a variable is updated over the shared memory
-        // NOTE: YOU SHOULD MAKE SURE TO RECEIVE ALL VARIABLES IN YOUR SHARED MEMORY (Active and anything defined in SharedVars 
-        // callback can be specified or nil, if you just want to receive.
-        // smClient:receiveVar("<variable name>",<callback>)
-        // Variables which are set only once, in the serverside initSync function, do not need to be specified here, as the synchronization copies them over.
-        // The reason we have these is to "listen" for the net messages. If we don't, we will never receive them.
         
-        smClient:receiveVar("Gun1CoolDown",nil)    smClient:receiveVar("Gun1ShotsLeft",nil)   smClient:receiveVar("Gun1TotalAmmo",nil)    smClient:receiveVar("Gun1AmmoType",nil) smClient:receiveVar("Gun1Penetration",nil)
-        smClient:receiveVar("Gun2CoolDown",nil)    smClient:receiveVar("Gun2ShotsLeft",nil)   smClient:receiveVar("Gun2TotalAmmo",nil)    smClient:receiveVar("Gun2AmmoType",nil)
-        smClient:receiveVar("Gun3CoolDown",nil)    smClient:receiveVar("Gun3ShotsLeft",nil)   smClient:receiveVar("Gun3TotalAmmo",nil)    smClient:receiveVar("Gun3AmmoType",nil)
-        smClient:receiveVar("CamYaw",nil)   smClient:receiveVar("CamDist",nil)   smClient:receiveVar("Crew",nil)   smClient:receiveVar("Health",nil)   smClient:receiveVar("ServerUS",nil)   
-        smClient:receiveVar("SMCoolDown",nil)   smClient:receiveVar("FOV",nil) smClient:receiveVar("FLIREnabled",nil)
+        
     end
     
     net.receive("hide_compass",function() hideHud = true end) // Receive chat command to hide compass
     
-    hudClient = HudBase["client"]:new(smClient,clientInit,clientMain,initSync,CLIENT_TIME_STEP,renderHud,receptions) // Don't touch this
+    hudClient = HudBase["client"]:new(smClient,clientInit,clientMain,initSync,CLIENT_TIME_STEP,renderHud) // Don't touch this
 elseif SERVER then
     // All the things that happen here happen in the SERVER context. You can't access CLIENT only things from here.
     setIO(

@@ -1,4 +1,4 @@
---@name Modular Shared Memory Library 2
+--@name Modular Shared Memory Library 3
 --@author
 --@shared
 
@@ -30,17 +30,32 @@ do
             - (e.x. nameTypePairs = {Gun = "Entity", Speed = "Float"}
     ]]--
     function sharedMemory:initialize(nameTypePairs)
-        if nameTypePairs == nil then nameTypePairs = {} end
         self.variables = table.getKeys(nameTypePairs)
         self.valueLookup = {}
         self.typeLookup = {}
+        self.callBackLookup = {}
+        self.syncCallback = nil
 
         for k, v in pairs(nameTypePairs) do
             self.typeLookup[k] = v
             self.valueLookup[k] = nullTypeLookup[v]
+            
+            net.receive("shared_memory_variable_send_"..k,function()
+                local value = readTypeLookup[self.typeLookup[k]]()            
+                self.valueLookup[k] = value  
+                if self.callBackLookup[k] ~= nil then self.callBackLookup[k](value) end
+            end)
         end
+        
+        net.receive("shared_memory_sync", function() 
+            local tbl = net.readTable()        
+            self.variables = tbl[1]
+            self.typeLookup = tbl[2]
+            self.valueLookup = tbl[3]
+            if self.syncCallback ~= nil then self.syncCallback() end
+        end)
     end   
-    
+
     // Single variable related functions
     
     --[[
@@ -54,19 +69,9 @@ do
         self.valueLookup[name] = value
         net.start("shared_memory_variable_send_"..name) writeTypeLookup[self.typeLookup[name]](value) net.send()
     end
-    
-    --[[
-    When called, defines how a variable will be received.
-        - name is a string representing the variable's name
-        - callback if specified, will be called with the new value
-    ]]--
-    function sharedMemory:receiveVar(name,callback)
-        net.receive("shared_memory_variable_send_"..name,function()
-            local value = readTypeLookup[self.typeLookup[name]]()            
-            self.valueLookup[name] = value
-            if callback ~= nil then callback(value) end   
-            if changeCallback ~= nil then changeCallback() end  
-        end)
+
+    function sharedMemory:setVarCallBack(name,callBack)
+        self.callBackLookup[name] = callBack
     end
 
     --[[
@@ -133,13 +138,6 @@ do
         end)
     end
     
-    --[[
-    If a callback is provided, it will be called with no values whenever a variable or group is received
-    ]]--
-    function sharedMemory:setOnChangedCallback(callback)
-        self.changeCallback = callback
-    end
-    
     // Initial setup functions
     
     --[[
@@ -148,15 +146,6 @@ do
     function sharedMemory:setVars(nameValuePairs)
         for k,v in pairs(nameValuePairs) do
             self.valueLookup[k] = v
-        end
-    end
-    
-    --[[
-    Sets the types of variables in a user locally. It does not update the other user.
-    ]]--    
-    function sharedMemory:setTypes(typeValuePairs)
-        for k,v in pairs(typeValuePairs) do
-            self.typeLookup[k] = v
         end
     end
     
@@ -173,14 +162,8 @@ do
     --[[
     If provided with a callback, it will be called when the current user is synchronized
     ]]--
-    function sharedMemory:receiveSync(callback)
-        net.receive("shared_memory_sync", function() 
-            local tbl = net.readTable()        
-            self.variables = tbl[1]
-            self.typeLookup = tbl[2]
-            self.valueLookup = tbl[3]
-            if callback ~= nil then callback() end
-        end)
+    function sharedMemory:setSyncCallBack(callBack)
+        self.syncCallback = callBack
     end
     
     --[[
@@ -200,4 +183,3 @@ do
 end
 
 return sharedMemory
-

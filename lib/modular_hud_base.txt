@@ -32,7 +32,7 @@ Contact (Discord: Len#4767) ((Please read comments before asking, I will try to 
 ]]--
 local hudClient = class("modular_hud_base_client")
 do
-    function hudClient:initialize(sharedMemory,clientInit,clientMain,initSync,timeStep,renderHud,receptions) 
+    function hudClient:initialize(sharedMemory,clientInit,clientMain,initSync,timeStep,renderHud) 
         self.sharedMemory = sharedMemory       
         self.timeStep = timeStep
         
@@ -54,31 +54,26 @@ do
         end
 
         self.renderHud = function()
+            //print(self.sharedMemory:getVar("Active"))
             if self.sharedMemory:getVar("Active") == 0 then return end
             renderHud()    
         end
-        
-        self.receptions = receptions
-        receptions()
-        self.sharedMemory:receiveVar("Active",nil)
-        
-        self.sharedMemory:receiveSync(self.initSync)
+                
+        self.sharedMemory:setSyncCallBack(self.initSync)
     end
 end
 
 local hudServer = class("modular_hud_base_server")
 do
-    function hudServer:initialize(sharedMemory,serverInit,serverMain,initSync,inputChecks,timeStep,inputClk,dupeFinished,dupeFinishTime)
+    function hudServer:initialize(sharedMemory,serverInit,serverMain,initSync,timeStep,inputClk,dupeFinished,dupeFinishTime)
         self.sharedMemory = sharedMemory
-        self.sharedMemory:addLocalVar("Active",0,"Float")
-
+        
         self.timeStep = timeStep
         
         self.serverInit = function()
             serverInit()
             self.initSync()
-            timer.create("modular_hud_server_thread_1",self.timeStep,0,self.serverMain)          
-            self.sharedMemory:sendVar("Active",0) 
+            timer.create("modular_hud_server_thread_1",self.timeStep,0,self.serverMain)
         end
                  
         self.serverMain = function()
@@ -87,11 +82,8 @@ do
         end
         
         self.initSync = function()
-            checkInputEnts(inputChecks,function()
-                initSync()    
-                self.sharedMemory:sync()                
-            end)
-
+            initSync()    
+            self.sharedMemory:sync()                
         end
         
         self.dupeFinished = dupeFinished
