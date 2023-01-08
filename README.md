@@ -13,16 +13,18 @@ An implementation of a modular HUD in SF for Garry's Mod
 
 # Installation Instructions:
 1. Download the zip folder and unzip it
-2. Locate your starfall directory
+   Navigate into the unzipped folder and you should see something like this:
+   ![image](https://user-images.githubusercontent.com/109800352/211176413-e9b075d4-801c-48f4-8eef-a30a7957b4f5.png)
+   
+2. Copy the highlighted folder and file to your SF directory and do not copy `README.md`. If there are conflicts, always choose the new file.
    (e.x. `C:\Program Files (x86)\Steam\steamapps\common\GarrysMod\garrysmod\data\starfall`)
-3. Copy and paste the files, maintaining the same file hierarchy, into your starfall folder.
-    - As a result, your files should look like this:
-        - `starfall\lib\modular_hud_base.txt`
-        - `starfall\lib\modular_hud_elements_base.txt`
-        - `starfall\lib\modular_hud_elements_daktank.txt`
-        - `starfall\lib\modular_shared_memory_3.txt`
-        - `starfall\lib\modular_wire_helper.txt`
-        - `starfall\modular_hud_v1_(public_release)_(daktank).txt`
+3. As a result, your files should look like this:
+      - `starfall\lib\modular_hud_base.txt`
+      - `starfall\lib\modular_hud_elements_base.txt`
+      - `starfall\lib\modular_hud_elements_daktank.txt`
+      - `starfall\lib\modular_shared_memory_3.txt`
+      - `starfall\lib\modular_wire_helper.txt`
+      - `starfall\modular_hud_v1_(public_release)_(daktank).txt`
 
 # Notes:
 - The HUD elements aren't completely modular, and could be improved (e.x. autocalculating alignments for text in boxes). At the end of the day, the level of abstraction is up to the user to decide. The HUD elements are just there to provide basic functionality, and to demonstrate what is possible.
