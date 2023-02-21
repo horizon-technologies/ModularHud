@@ -12,7 +12,7 @@ An implementation of a modular HUD in SF for Garry's Mod
 - Currently only a daktank example hud has been created. If the time presents itself, an ACF example may be made.
 
 # Installation Instructions:
-- [ACF](https://github.com/LengthenedGradient/ModularHud/wiki/ACF-HUD-Element-Documentation)
+- [ACF](https://github.com/LengthenedGradient/ModularHud/wiki/ACF-HUD-Setup-Guide)
 - [Daktank](https://github.com/LengthenedGradient/ModularHud/wiki/Daktank-HUD-Setup-Guide)
 
 # Notes:
