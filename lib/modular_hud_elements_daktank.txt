@@ -33,7 +33,7 @@ This class represents a reload indicator that is slaved to the gun* (can be chan
         - filter (function) should be a function which takes an entity input and returns true if it should be filtered (function(x) return x:getOwner() ~= owner())
             - filter can also be a table of entities or a single entity (its passed directly to trace's filter argument)
         - simple (boolean) represents whether the ring should be exist in two states (ready/unready) or be colored like a progress bar (with states between). 
-        - usesMag (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
+        - hasMag (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
         - magTime (float) represents how long it takes for your autoloader magazine to reload (must be specified if using a mag)
         - magSize (float) represents the capacity of your autoloader magazine, i.e. how many shells per mag (must be specified if using a mag)
 Note:
@@ -58,7 +58,7 @@ do
         
         if options["filter"] ~= nil then self.filter = filter else self.filter = function(x) return x:getOwner() ~= owner() end end
         if options["simple"] ~= nil then self.simple = options["simple"] else self.simple = false end
-        if options["usesMag"] ~= nil then self.usesMag = options["usesMag"] else self.usesMag = false end
+        if options["hasMag"] ~= nil then self.hasMag = options["hasMag"] else self.hasMag = false end
         if options["magTime"] ~= nil then self.magReloadTime = options["magTime"] end
         if options["magSize"] ~= nil then self.magSize = options["magSize"] end
 
@@ -101,9 +101,9 @@ do
         
         
         local progress = 0
-        if mag == self.magSize and coolDown > 0 and self.usesMag == true then self.reloadTime = self.magReloadTime else self.reloadTime = self.shellReloadTime end
+        if mag == self.magSize and coolDown > 0 and self.hasMag == true then self.reloadTime = self.magReloadTime else self.reloadTime = self.shellReloadTime end
 
-        if ((ammo - self.lastAmmo) < 0 or ammoType ~= self.lastAmmoType) then // A shot was fired or the ammo type was changed (as of now daktank refills do not exist)
+        if ((ammo - self.lastAmmo) < 0 or ammoType ~= self.lastAmmoType) and ammo ~= 0 then // (A shot was fired or the ammo type was changed) and the ammo isn't empty
             self.lastFired = timer.curtime() - sensitivityDelay
             progress = 0
         else
@@ -124,12 +124,18 @@ do
             
             // Coloring logic
             local loaded = (coolDown == 0)
-            if not self.simple and self.reloadTime >= 0.5 then // No point rendering it if its any quicker
+            local empty = (ammo == 0)
+            
+            if not self.simple and self.reloadTime >= 0.5 then 
+                // No point rendering it if its any quicker (use simple if it fires faster)
                 if loaded then render.setColor(self.readyColor)
+                elseif empty then render.setColor(self.emptyColor)
                 elseif i > cutoff then render.setColor(self.remainReloadColor) 
                 else render.setColor(self.reloadColor) end
             else
+                // Color everything ready/remain, with no "progress"
                 if loaded then render.setColor(self.readyColor) 
+                elseif empty then render.setColor(self.emptyColor)
                 elseif not loaded then render.setColor(self.emptyColor)        
                 else render.setColor(self.remainReloadColor) end
             end
@@ -143,7 +149,7 @@ This class represents a reload timer that shows how long shells will take to loa
 Positioned at px,py, with dimensions width,height and color c1
     - normalTime (float) represents the time it takes for your gun to load a shell (not mag time).
     - options should be a table consisting of any of the following parameters: 
-        - usesMag (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
+        - hasMag (string) represents whether the gun has a magazine (e.x. autoloaders) or if its a single shot gun (e.x. cannons) (must be specified if using a mag)
         - magTime (float) represents how long it takes for your autoloader magazine to reload (must be specified if using a mag)
         - bckgndCol (color) specifies the color that is used to draw the opaque background. By default, the color Color(0,0,0,100) is used.
         - fontName (string) specifies the font to use when drawing text. The size is scaled by the element itself. Defaults to Coolvetica.
@@ -167,7 +173,7 @@ do
         self.reloadTime = normalTime
         self.c1 = c1
         
-        if options["usesMag"] ~= nil then self.usesMag = options["usesMag"] else self.usesMag = false end
+        if options["hasMag"] ~= nil then self.hasMag = options["hasMag"] else self.hasMag = false end
         if options["magTime"] ~= nil then self.magReloadTime = options["magTime"] end
         if options["bckgndCol"] ~= nil then self.backGroundCol = options["bckgndCol"] else self.backGroundCol = Color(0,0,0,100) end 
         if options["fontName"] ~= nil then self.fontName = options["fontName"] else self.fontName = "Coolvetica" end        
@@ -184,7 +190,7 @@ do
 
         local time = 0           
         if coolDown == 0 then
-            if self.usesMag == true and magOrAmmo == 1 then time = self.magReloadTime
+            if self.hasMag == true and magOrAmmo == 1 then time = self.magReloadTime
             else time = self.reloadTime end
         else 
             time = coolDown

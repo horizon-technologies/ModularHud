@@ -206,7 +206,9 @@ if CLIENT then
         // Since this is also in a render context, you can use render functions here.
         hudElem["CrossHair"]:render()
        
-        hudElem["ReloadCross1"]:render(smClient:getVar("Gun1CoolDown"),smClient:getVar("Gun1ShotsLeft"),smClient:getVar("Gun1TotalAmmo"),0,0)
+        if smClient:getVar("Gun1") != nil then
+            hudElem["ReloadCross1"]:render(smClient:getVar("Gun1CoolDown"),smClient:getVar("Gun1ShotsLeft"),smClient:getVar("Gun1TotalAmmo"),smClient:getVar("Gun1AmmoType"),0,nil)
+        end
         
         hudElem["Rangefind"]:render(math.round(smClient:getVar("CamDist")*DIST_CONV)..DIST_UNIT)
         hudElem["Penetration"]:render(math.floor(smClient:getVar("Gun1Penetration")).."mm")
@@ -239,8 +241,6 @@ if CLIENT then
         local resAdjust = RES[3]/1080   
         render.drawText(cenX+800*resAdjust,cenY+400*resAdjust,"CLIENT US: "..math.round(cpuAverage()*1000000),0) 
         render.drawText(cenX+800*resAdjust,cenY+420*resAdjust,"SERVER US: "..smClient:getVar("ServerUS"),0)      
-        
-        
     end
     
     local initSync = function() // Called after the server sends information to the client, via the function defined by the serverside initSync
@@ -254,10 +254,12 @@ if CLIENT then
         
         // You can find out how to initialize these hud elements by their documentation in the files where they are defined
         hudElem["CrossHair"] = MHEBasic["CrossHair"]:new(RES,0,0,10,2,PrimCol,{})
-
-        hudElem["ReloadCross1"] = MHEDak["ReloadIndicator"]:new(RES,10,12,32,smClient:getVar("Gun1"),smClient:getVar("Gun1ReloadTime"),
-        {simple=false,hasMag=smClient:getVar("Gun1HasMag"),magTime=smClient:getVar("Gun1MagReloadTime"),magSize=smClient:getVar("Gun1ShotsLeft")})
         
+        if smClient:getVar("Gun1") != nil then // We do this so that if gun1 isn't wired, this isn't ran
+            hudElem["ReloadCross1"] = MHEDak["ReloadIndicator"]:new(RES,10,12,32,smClient:getVar("Gun1"),smClient:getVar("Gun1ReloadTime"),
+            {simple=false,hasMag=smClient:getVar("Gun1HasMag"),magTime=smClient:getVar("Gun1MagReloadTime"),magSize=smClient:getVar("Gun1ShotsLeft")})
+        end
+    
         hudElem["Rangefind"] = MHEBasic["TextSimple"]:new(RES,60,50,16,PrimCol,{hAlign = 0})
         hudElem["Penetration"] = MHEBasic["TextSimple"]:new(RES,-60,50,16,PrimCol,{hAlign = 2})
         
@@ -273,9 +275,9 @@ if CLIENT then
         hudElem["Ammo2Text"] = MHEBasic["TextBox"]:new(RES,-400,0,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
         hudElem["Ammo3Text"] = MHEBasic["TextBox"]:new(RES,-400,50,120,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
         
-        hudElem["Ammo1Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,-50,50,30,smClient:getVar("Gun1ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun1MagReloadTime")})
-        hudElem["Ammo2Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,0,50,30,smClient:getVar("Gun2ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun2MagReloadTime")})
-        hudElem["Ammo3Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,50,50,30,smClient:getVar("Gun3ReloadTime"),PrimCol,{magType="mag",magTime=smClient:getVar("Gun3MagReloadTime")})
+        hudElem["Ammo1Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,-50,50,30,smClient:getVar("Gun1ReloadTime"),PrimCol,{hasMag=smClient:getVar("Gun1HasMag"),magTime=smClient:getVar("Gun1MagReloadTime")})
+        hudElem["Ammo2Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,0,50,30,smClient:getVar("Gun2ReloadTime"),PrimCol,{hasMag=smClient:getVar("Gun2HasMag"),magTime=smClient:getVar("Gun2MagReloadTime")})
+        hudElem["Ammo3Timer"] = MHEDak["ReloadTimer"]:new(RES,-500,50,50,30,smClient:getVar("Gun3ReloadTime"),PrimCol,{hasMag=smClient:getVar("Gun3HasMag"),magTime=smClient:getVar("Gun3MagReloadTime")})
         
         // Using the following colFunc, if x is 1, it returns 0 which means highCol. If x is anything else, return 0 which means lowCol.
         hudElem["SmokeBox"] = MHEBasic["TextBox"]:new(RES,-292.5,215,55,30,16,PrimCol,{lowCol=Color(255,0,0),highCol=Color(0,255,0),useBool=true,useFunc=function(x) return x==0 end})
@@ -287,8 +289,6 @@ if CLIENT then
         
         print(Color(0,255,0),"Modular Hud V1 Daktank Initialized.")
         print(Color(255,93,0),"Type !hidehud to hide your compass for use in the gamemode")
-        
-        
     end
     
     net.receive("hide_compass",function() hideHud = true end) // Receive chat command to hide compass
@@ -296,6 +296,7 @@ if CLIENT then
     hudClient = HudBase["client"]:new(smClient,clientInit,clientMain,initSync,CLIENT_TIME_STEP,renderHud) // Don't touch this
 elseif SERVER then
     // All the things that happen here happen in the SERVER context. You can't access CLIENT only things from here.
+    // This is just to make mass amounts of inputs more readable. You could use the normal way if you wanted (wire.adjustPorts)
     setIO(
         parseE2IO("Gun1:entity Gun2:entity Gun3:entity Turret:entity Base:entity Active FOV CamAng:angle CamHitPos:vector Crew Health SMCoolDown FLIRIn"),
         parseE2IO("FLIROut")

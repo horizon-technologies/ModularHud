@@ -204,22 +204,7 @@ do
         cardinal[90] = "E"
         cardinal[180] = "S"
         cardinal[270] = "W"
---[[
-        for i = m1, m2 do
-            local frac = (i * self.tickRes - left) / (right - left)
-            local curAngle = (i*self.tickRes % 360)
-            local char = ""
-            if cardinal[curAngle] ~= nil then char = cardinal[curAngle] else char = ""..curAngle end
-            render.drawSimpleText(self.px - self.width/2 + self.width * frac,self.py - self.height*0.25,char,1,1)
-        end
         
-        local m3 = math.ceil(left/self.subTickRes)
-        local m4 = math.floor(right/self.subTickRes)
-        for i = m3, m4 do
-            local frac = (i * self.subTickRes - left) / (right - left)
-            render.drawRect(self.px - self.width/2 + self.width * frac - self.tickWidth/2,self.py + self.height/2 - self.tickHeight, self.tickWidth, self.tickHeight)
-        end        
-]]        
         local m3 = math.ceil(left/self.subTickRes)
         local m4 = math.floor(right/self.subTickRes)
         for i = m3, m4 do

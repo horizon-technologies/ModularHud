@@ -20,23 +20,26 @@ Function that parses a string similar to the e2 style input annotations
 function parseE2IO(inputStr)
     if inputStr == "" then return nil end
     
-    local tbl = {}
+    local names = {}
+    local types = {}
     local temp = string.explode(" ", inputStr, nil)
     for k, v in ipairs(temp) do
         local pair = string.explode(":",v,nil)
         local name = pair[1]
         local type = "number" // If type is not designated, remain number
         if #pair == 2 then type = pair[2] end // If type is designated
-        tbl[name] = type
+        names[k] = name
+        types[k] = type
     end
-    return tbl
+    return {names, types}
 end
 
 --[[
 Wrapper function for wire.adjustPorts, purely aesthetical, kind of redundant.
 ]]--
-function setIO(inputs,outputs)
-    wire.adjustPorts(inputs,outputs)
+function setIO(inputTable,outputTable)
+    if inputTable ~= nil then wire.adjustInputs(inputTable[1],inputTable[2]) end
+    if outputTable ~= nil then wire.adjustOutputs(outputTable[1],outputTable[2]) end
 end
 
 --[[
@@ -75,3 +78,4 @@ function inputClk(name, callback)
         end    
     end)
 end
+
