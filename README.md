@@ -18,4 +18,5 @@ An implementation of a modular HUD in SF for Garry's Mod
 # Notes:
 - The HUD elements aren't completely modular, and could be improved (e.x. autocalculating alignments for text in boxes). At the end of the day, the level of abstraction is up to the user to decide. The HUD elements are just there to provide basic functionality, and to demonstrate what is possible.
 - At the time of writing, I have tried my best to optimize the libraries, (and the client/server usages do seem to reflect it), but I won't act like I know everything about optimization. There is always room for improvement.
+    - I can guarantee the optimizations of the example HUDs; not so much any modifications made after. I have included tips for optimization in the FAQ of the wiki.
 - Some libraries like the wire helpers offer functionality which could be considered redundant or excessive. If this is the case, feel free to modify what is necessary (e.x. remove the entity valid checks from hud base and you no longer depend on the wire helper library).
